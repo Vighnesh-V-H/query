@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from query import llm
+from query import config, llm
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -10,7 +10,7 @@ def main(argv: list[str] | None = None) -> int:
 
     smoke = sub.add_parser("smoke-llm", help="make one LLM call via a configured role")
     smoke.add_argument("--prompt", default="Reply with the single word: ok")
-    smoke.add_argument("--role", default="labeler", choices=["generator", "judge", "labeler"])
+    smoke.add_argument("--role", default="generator", choices=list(config.ROLES))
 
     args = parser.parse_args(argv)
 
@@ -23,8 +23,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"model: {reply.model}")
         print(f"reply: {reply.content.strip()}")
         return 0
-
-    return 2
 
 
 if __name__ == "__main__":

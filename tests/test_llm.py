@@ -33,7 +33,7 @@ class _FakeClient:
         self.chat = _FakeChat(self.completions)
 
 
-def test_call_llm_uses_configured_role_model(models_config=None):
+def test_call_llm_uses_configured_role_model():
     fake = _FakeClient(content="ok")
     cfg = {
         "generator": "test/gen",

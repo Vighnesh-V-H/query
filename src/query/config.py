@@ -15,7 +15,8 @@ class ConfigError(Exception):
 
 
 @lru_cache(maxsize=1)
-def load_models_config(path: str = MODELS_CONFIG_PATH) -> dict:
+def load_models_config() -> dict:
+    path = os.environ.get("QUERY_CONFIG_PATH") or MODELS_CONFIG_PATH
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict):
@@ -26,7 +27,7 @@ def load_models_config(path: str = MODELS_CONFIG_PATH) -> dict:
     provider = cfg.get("provider") or {}
     if not provider.get("base_url"):
         raise ConfigError("models config is missing provider.base_url")
-    return cfg
+    return dict(cfg)
 
 
 def model_for(role: str, config: dict | None = None) -> str:
@@ -34,7 +35,9 @@ def model_for(role: str, config: dict | None = None) -> str:
         raise ConfigError(f"unknown role '{role}', expected one of {ROLES}")
     cfg = config if config is not None else load_models_config()
     env_key = f"QUERY_{role.upper()}_MODEL"
-    return os.environ.get(env_key) or cfg[role]
+    if env_key in os.environ:
+        return os.environ[env_key]
+    return cfg[role]
 
 
 def base_url(config: dict | None = None) -> str:

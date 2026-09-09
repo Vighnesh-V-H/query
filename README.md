@@ -15,7 +15,7 @@ cp .env.example .env   # then set OPENROUTER_API_KEY
 ## Smoke test the LLM connection
 
 ```sh
-uv run query smoke-llm --role labeler
+uv run query smoke-llm --role generator
 ```
 
 ## Run tests

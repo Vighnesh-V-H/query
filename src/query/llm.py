@@ -35,5 +35,7 @@ def call_llm(
         ],
         temperature=temperature,
     )
+    if not response.choices:
+        raise RuntimeError(f"model '{model}' returned no choices (upstream error or rate limit)")
     content = response.choices[0].message.content or ""
     return LLMReply(content=content, model=model)
