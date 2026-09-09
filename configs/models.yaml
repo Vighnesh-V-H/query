@@ -1,0 +1,9 @@
+# Pipeline roles mapped to OpenRouter model ids.
+# Override any role with an env var: QUERY_<ROLE>_MODEL (e.g. QUERY_GENERATOR_MODEL).
+# All defaults are free-tier models so reproduction costs $0.
+generator: meta-llama/llama-3.3-70b-instruct:free
+judge: google/gemini-2.0-flash-exp:free
+labeler: meta-llama/llama-3.1-8b-instruct:free
+
+provider:
+  base_url: https://openrouter.ai/api/v1
