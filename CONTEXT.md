@@ -9,7 +9,7 @@ The company the agent supports. In v0, exactly one: SpotifyCares.
 _Avoid_: company, handle, account
 
 **Interaction**:
-A single customer issue: starts with a customer message and ends at natural closure. A customer message arriving after closure starts a new Interaction.
+A single customer issue: starts with a customer message and ends at its closure verdict — Resolved, Uncertain, or Unresolved. A returning customer's next message always starts a new Interaction.
 _Avoid_: conversation, thread, ticket
 
 **Customer Message**:
