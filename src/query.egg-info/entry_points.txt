@@ -1,2 +1,0 @@
-[console_scripts]
-query = query.cli:main
