@@ -1,28 +1,15 @@
 [project]
-name = "query"
-version = "0.1.0"
-description = "AI support agent for SpotifyCares - intent classification, grounded replies, auto/escalate decisions"
+name = "query-monorepo"
+version = "0.0.0"
+description = "Query monorepo - AI support agent for SpotifyCares (backend + frontend)"
 requires-python = ">=3.11"
-dependencies = [
-    "openai>=1.40",
-    "pyyaml>=6.0",
-    "python-dotenv>=1.0",
-]
+dependencies = ["query"]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-]
+[tool.uv]
+package = false
 
-[project.scripts]
-query = "query.cli:main"
+[tool.uv.sources]
+query = { workspace = true }
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.uv.workspace]
+members = ["apps/backend"]
