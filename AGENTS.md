@@ -34,6 +34,35 @@ Use standard naming and commit message styles:
 - Review gate findings and resolve them (approve fixes, apply changes) before moving on.
 - If the gate reports "Checks passed", stop and ask the user to review and merge the PR.
 
+## 5. Change report after every completed task
+
+After completing any task, fix, or change, report to the user in this standard format:
+
+```text
+## Change report — <task/issue title>
+
+### Modified files
+| File | What was done | Impact on other files |
+|------|---------------|----------------------|
+| path/to/file | what changed there and why | which files/behavior it affects |
+
+### New files (if any)
+| File | Purpose | Consumed by |
+|------|---------|-------------|
+
+### Removed files (if any)
+| File | Why removed | What replaced it |
+|------|-------------|------------------|
+
+### Verification
+How the change was verified (tests run, commands executed, manual checks).
+
+### Follow-ups
+Tickets, blockers, or downstream effects this change creates.
+```
+
+Keep it concise: one row per file, no diff dumps. Every completed task gets this report before moving on.
+
 ## Additional guidelines
 
 Will be added as the project evolves.
