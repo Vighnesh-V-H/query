@@ -60,7 +60,6 @@ uv run --package query query filter-english --in data/interactions.jsonl --out d
 
 The run over the provided dataset retains 29,130 of 29,796 Interactions: 666 (2.24%) are dropped as confidently non-English (mostly Indonesian, Tagalog, Dutch, and French), and 2,938 short or link-only messages stay because the detector has no confident signal — the filter only drops positive non-English evidence. `--out` writes the retained Interactions in the same JSON Lines format; `--report` writes the counts by detected language as JSON. The stage is deterministic and re-runnable; `--in` defaults to `data/interactions.jsonl`.
 
-
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
