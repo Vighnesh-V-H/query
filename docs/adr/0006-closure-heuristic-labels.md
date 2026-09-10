@@ -26,6 +26,6 @@ The ambiguous middle is flagged, not guessed: brand replies that move the conver
 
 ## Consequences
 
-- The run labels 1,694 of 3,000 Interactions (56.5%) definitively — 190 Resolved, 1,250 Uncertain, 254 Unresolved — and flags 1,306 (43.5%), of which 1,225 (94%) involve a move to DMs. Among endings that never touch DMs, 95.4% get a definitive label.
+- The run labels 1,694 of 3,000 Interactions (56.5%) definitively — 190 Resolved, 1,317 Uncertain, 187 Unresolved — and flags 1,306 (43.5%), of which 1,225 (94%) involve a move to DMs. Among endings that never touch DMs, 95.4% get a definitive label.
 - `data/closure-labels.jsonl` is the input contract for ticket 7 (adjudication) and ticket 8 (resolution dataset). Flagged records have `label: null`: a consumer that only understands labels must skip them, never default them.
 - Only Resolved Cases (the 190 heuristic ones plus whatever ticket 7 recovers) become retrieval-eligible Historical Cases; Uncertain and Unresolved never enter the index (decision 4).
