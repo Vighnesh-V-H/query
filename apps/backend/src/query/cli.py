@@ -93,7 +93,24 @@ def main(argv: list[str] | None = None) -> int:
                 if args.out
                 else None
             )
-        except interactions.InteractionsError as exc:
+            if args.report:
+                payload = {
+                    "brand_id": report.brand_id,
+                    "total_rows": report.total_rows,
+                    "inbound_rows": report.inbound_rows,
+                    "brand_rows": report.brand_rows,
+                    "seed_count": report.seed_count,
+                    "opening_count": report.opening_count,
+                    "absorbed_openings": report.absorbed_openings,
+                    "interactions": report.interactions,
+                    "unanswered_openings": report.unanswered_openings,
+                    "turns_total": report.turns_total,
+                    "turns_customer": report.turns_customer,
+                    "turns_brand": report.turns_brand,
+                }
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except (interactions.InteractionsError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         lines = [
@@ -108,22 +125,6 @@ def main(argv: list[str] | None = None) -> int:
         for line in lines:
             print(line)
         if args.report:
-            payload = {
-                "brand_id": report.brand_id,
-                "total_rows": report.total_rows,
-                "inbound_rows": report.inbound_rows,
-                "brand_rows": report.brand_rows,
-                "seed_count": report.seed_count,
-                "opening_count": report.opening_count,
-                "absorbed_openings": report.absorbed_openings,
-                "interactions": report.interactions,
-                "unanswered_openings": report.unanswered_openings,
-                "turns_total": report.turns_total,
-                "turns_customer": report.turns_customer,
-                "turns_brand": report.turns_brand,
-            }
-            args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
             print(f"report written: {args.report}")
         if output_path is not None:
             print(f"interactions written: {output_path}")

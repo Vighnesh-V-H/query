@@ -462,6 +462,46 @@ class TestCli:
         assert len(lines) == 1
         assert json.loads(lines[0])["interaction_id"] == 1
 
+    def test_build_interactions_report_write_error_returns_1(self, tmp_path, capsys):
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares my app crashes"', ""),
+            _row(2, BRAND, "False", _dt(11), '"@cust try a reinstall"', 1),
+        ])
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+
+        assert cli.main(
+            [
+                "build-interactions",
+                "--twcs",
+                str(csv_path),
+                "--report",
+                str(blocker / "counts.json"),
+            ]
+        ) == 1
+        assert "error:" in capsys.readouterr().err
+
+    def test_build_interactions_out_write_error_returns_1(self, tmp_path, capsys):
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares my app crashes"', ""),
+            _row(2, BRAND, "False", _dt(11), '"@cust try a reinstall"', 1),
+        ])
+        blocker = tmp_path / "blocker"
+        blocker.write_text("not a directory", encoding="utf-8")
+
+        assert cli.main(
+            [
+                "build-interactions",
+                "--twcs",
+                str(csv_path),
+                "--out",
+                str(blocker / "interactions.jsonl"),
+            ]
+        ) == 1
+        assert "error:" in capsys.readouterr().err
+
     def test_build_interactions_command_errors_on_missing_csv(self, tmp_path, capsys):
         assert cli.main(["build-interactions", "--twcs", str(tmp_path / "nope.csv")]) == 1
         assert "error:" in capsys.readouterr().err
