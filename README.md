@@ -24,4 +24,6 @@ uv run query smoke-llm --role generator
 uv run pytest
 ```
 
-Model roles (generator / judge / labeler) live in `configs/models.yaml` and can be overridden with `QUERY_<ROLE>_MODEL` env vars.
+## Model configuration
+
+Model roles (generator / judge / labeler) and the OpenRouter base URL live in `configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file instead of `configs/models.yaml`.

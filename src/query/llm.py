@@ -13,7 +13,7 @@ class LLMReply:
 
 def make_client(models_config: dict | None = None) -> OpenAI:
     cfg = models_config if models_config is not None else config.load_models_config()
-    return OpenAI(base_url=cfg["provider"]["base_url"], api_key=config.api_key())
+    return OpenAI(base_url=config.base_url(cfg), api_key=config.api_key())
 
 
 def call_llm(

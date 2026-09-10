@@ -35,8 +35,9 @@ def model_for(role: str, config: dict | None = None) -> str:
         raise ConfigError(f"unknown role '{role}', expected one of {ROLES}")
     cfg = config if config is not None else load_models_config()
     env_key = f"QUERY_{role.upper()}_MODEL"
-    if env_key in os.environ:
-        return os.environ[env_key]
+    override = os.environ.get(env_key)
+    if override:
+        return override
     return cfg[role]
 
 
