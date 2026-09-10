@@ -269,6 +269,28 @@ def write_interactions_jsonl(
     format downstream stages (English filter, sampling) consume.
     """
     output_path = Path(output_path)
+    temporary_path = stage_interactions_jsonl(interactions, output_path)
+    try:
+        os.replace(temporary_path, output_path)
+    except BaseException:
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            pass
+        raise
+    return output_path
+
+
+def stage_interactions_jsonl(
+    interactions: tuple[Interaction, ...], output_path: Path | str
+) -> Path:
+    """Write Interactions to a temporary sibling, ready to be swapped in.
+
+    Callers that must update several files as one transaction stage every
+    output first and then swap the returned paths in together, so a write
+    failure cannot leave a partial set of new files behind.
+    """
+    output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
@@ -277,14 +299,13 @@ def write_interactions_jsonl(
         with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as handle:
             for interaction in interactions:
                 handle.write(json.dumps(interaction_to_json(interaction)) + "\n")
-        os.replace(temporary_name, output_path)
     except BaseException:
         try:
             os.unlink(temporary_name)
         except OSError:
             pass
         raise
-    return output_path
+    return Path(temporary_name)
 
 
 def read_interactions_jsonl(
@@ -293,19 +314,27 @@ def read_interactions_jsonl(
     """Read Interactions back from the JSON Lines format written above.
 
     Inverse of :func:`write_interactions_jsonl`: parses every record and
-    validates its JSON Lines structure so downstream stages never see a
-    structurally malformed Interaction. Returns the Interactions in file order.
+    validates its JSON Lines structure and unique interaction ids so downstream
+    stages never see a structurally malformed Interaction. Returns the
+    Interactions in file order.
     """
     input_path = Path(input_path)
     if not input_path.is_file():
         raise InteractionsError(f"interactions JSONL does not exist: {input_path}")
     interactions = []
+    seen_ids: set[int] = set()
     with input_path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
             location = f"line {line_number} of {input_path}"
-            interactions.append(_parse_interaction_line(line, location))
+            interaction = _parse_interaction_line(line, location)
+            if interaction.interaction_id in seen_ids:
+                raise InteractionsError(
+                    f"duplicate interaction_id {interaction.interaction_id} on {location}"
+                )
+            seen_ids.add(interaction.interaction_id)
+            interactions.append(interaction)
     return tuple(interactions)
 
 

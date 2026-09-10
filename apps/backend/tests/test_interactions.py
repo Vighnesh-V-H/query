@@ -600,3 +600,12 @@ class TestReadInteractionsJsonl:
 
         assert len(found) == 1
         assert found[0].interaction_id == 1
+
+    def test_duplicate_interaction_id_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(path, [_interaction_record(1), _interaction_record(1)])
+
+        with pytest.raises(
+            interactions_mod.InteractionsError, match="duplicate interaction_id"
+        ):
+            interactions_mod.read_interactions_jsonl(path)

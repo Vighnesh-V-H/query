@@ -10,7 +10,7 @@ Non-obvious decisions made while building Query v0, and why. (Assignment deliver
 
 4. **Only Resolved Cases enter the RAG index.** Uncertain Cases are excluded from reply-generation evidence by construction, not by filtering at query time.
 
-5. **Sample-then-process.** ~4K threads sampled up front; resolution labeling, RAG index, and golden set all draw from that sample. Makes the <15-minute reproduction promise trivial.
+5. **Sample-then-process.** ~4K threads sampled up front; resolution labeling, RAG index, and golden set all draw from that sample. Makes the <15-minute reproduction promise trivial. Selection is hash-ranked by seed, so the sample is reproducible across machines (see `docs/adr/0005-sample-and-split.md`).
 
 6. **Holdout split to prevent leakage.** ~3K of the sample → RAG index pool, ~1K → holdout. The golden set is drawn only from the holdout, so headline numbers are not inflated by the generator retrieving a golden example's own thread.
 
