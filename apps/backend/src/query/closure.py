@@ -141,7 +141,8 @@ DM_REPLY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 # The brand claims the issue/action was completed. Closing courtesies ("you're
-# welcome") are not completion claims and live in COURTESY_PATTERN instead.
+# welcome") are not completion claims: they only count next to a customer
+# acknowledgement (see _label_brand_closing), never on their own.
 COMPLETION_PATTERN = re.compile(
     r"(we'?ve (?:fixed|resolved|processed|updated|sorted|taken care)|"
     r"has been (?:fixed|resolved|processed|updated)|"
@@ -157,7 +158,8 @@ SOFT_INVITE_PATTERN = re.compile(
     r"you know where to find us|we'?re (?:here|around)|just let us know|shout if|"
     r"reach out (?:if|anytime)|don'?t hesitate)",
     re.IGNORECASE,
-)# "Thanks anyway" is resignation, not an acknowledgement of resolution.
+)
+# "Thanks anyway" is resignation, not an acknowledgement of resolution.
 THANKS_ANYWAY_PATTERN = re.compile(r"thanks? (?:anyway|anyways)", re.IGNORECASE)
 # The brand says it cannot help.
 REFUSAL_PATTERN = re.compile(
