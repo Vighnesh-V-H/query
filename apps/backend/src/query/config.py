@@ -5,7 +5,7 @@ import yaml
 from dotenv import load_dotenv
 
 ROLES = ("generator", "judge", "labeler")
-# First set variable wins; order should match the active provider in configs/models.yaml.
+# First set variable wins; order should match the active provider in apps/backend/configs/models.yaml.
 API_KEY_VARS = ("NVIDIA_API_KEY", "OPENROUTER_API_KEY")
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -55,5 +55,5 @@ def api_key() -> str:
         if value:
             return value
     raise ConfigError(
-        f"no provider API key set; set one of {', '.join(API_KEY_VARS)} (see .env.example)"
+        f"no provider API key set; set one of {', '.join(API_KEY_VARS)} (see apps/backend/.env.example)"
     )
