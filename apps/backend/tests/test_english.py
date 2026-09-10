@@ -193,6 +193,26 @@ class TestFilterEnglishCli:
         assert payload["no_signal"] == 0
         assert payload["filter_rate"] == 0.5
         assert payload["filtered_by_language"] == {"SPANISH": 1}
+        assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_report_write_failure_keeps_previous_report(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        input_path = self._write_input(tmp_path, (_interaction(1, ENGLISH),))
+        report_path = tmp_path / "english-report.json"
+        report_path.write_text('{"previous": true}\n', encoding="utf-8")
+
+        def failing_replace(source, destination):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(cli.os, "replace", failing_replace)
+
+        assert cli.main(
+            ["filter-english", "--in", str(input_path), "--report", str(report_path)]
+        ) == 1
+        assert "error:" in capsys.readouterr().err
+        assert json.loads(report_path.read_text(encoding="utf-8")) == {"previous": True}
+        assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
 
     def test_command_without_outputs_prints_stats_only(self, tmp_path, capsys):
         input_path = self._write_input(tmp_path, (_interaction(1, ENGLISH),))

@@ -1,6 +1,8 @@
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 from query import config, english, interactions, llm, source
@@ -199,8 +201,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _write_json_report(path: Path, payload: dict) -> None:
+    """Write a JSON report, swapping the file in atomically.
+
+    Mirrors the JSONL writer: a failed or interrupted write must not truncate
+    the previous report.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, indent=2) + "\n")
+        os.replace(temporary_name, path)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
 
 
 if __name__ == "__main__":
