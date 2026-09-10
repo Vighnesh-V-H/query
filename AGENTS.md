@@ -64,6 +64,12 @@ Tickets, blockers, or downstream effects this change creates.
 
 Keep it concise: one row per file, no diff dumps. Every completed task gets this report before moving on.
 
+## 6. Parallel ticket work — one working tree per ticket
+
+- Never let two agents work in the same checkout. Each parallel ticket gets its own worktree (`git worktree add ../query-<ticket> <branch>`) or its own clone.
+- Never leave the shared working tree dirty while a no-mistakes run is active; commit pending work (on the right branch) first.
+- Prefer branching parallel tickets from the same base (e.g., `main` after the current PR merges) over stacking, unless there is a real dependency.
+
 ## Additional guidelines
 
 Will be added as the project evolves.
