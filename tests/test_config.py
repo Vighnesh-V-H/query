@@ -65,13 +65,16 @@ def test_model_for_unknown_role_raises(models_config):
 
 
 def test_api_key_missing_raises(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    for name in config.API_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(config, "load_dotenv", lambda: None)
     with pytest.raises(config.ConfigError):
         config.api_key()
 
 
 def test_api_key_from_env(monkeypatch):
+    for name in config.API_KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     monkeypatch.setattr(config, "load_dotenv", lambda: None)
     assert config.api_key() == "sk-test"
