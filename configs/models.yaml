@@ -1,9 +1,10 @@
-# Pipeline roles mapped to OpenRouter model ids.
+# Pipeline roles mapped to NVIDIA NIM model ids (OpenAI-compatible endpoint).
 # Override any role with an env var: QUERY_<ROLE>_MODEL (e.g. QUERY_GENERATOR_MODEL).
-# All defaults are free-tier models so reproduction costs $0.
-generator: meta-llama/llama-3.3-70b-instruct:free
-judge: google/gemini-2.0-flash-exp:free
-labeler: meta-llama/llama-3.1-8b-instruct:free
+# Judge is deliberately a different model family than the generator (self-preference bias).
+# Models verified invocable on the NVIDIA API catalog account (2026-09-10).
+generator: deepseek-ai/deepseek-v4-pro-0813
+judge: nvidia/nemotron-3-super-120b-a12b
+labeler: nvidia/nemotron-3.5-lightning-30b-a3b
 
 provider:
-  base_url: https://openrouter.ai/api/v1
+  base_url: https://integrate.api.nvidia.com/v1
