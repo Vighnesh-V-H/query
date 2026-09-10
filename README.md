@@ -70,6 +70,16 @@ uv run --package query query sample-split --in data/interactions-en.jsonl --rag-
 
 Selection ranks every Interaction by a SHA-256 of the seed and its interaction id (`--seed`, default 42), so the same seed yields the same sample on any machine and regardless of input-file order. The first 1,000 of the ranked sample become the holdout, the remaining 3,000 the RAG pool; the pools are written to separate files and never overlap. The holdout is reserved for the Golden Set — retrieval indexes only the RAG pool. `--sample-size` and `--holdout-size` override the defaults; when the input holds fewer Interactions than requested, the sample covers everything and the holdout scales down with it. `--in` defaults to `data/interactions-en.jsonl`; `--rag-out` and `--holdout-out` must be given together and must not point at the input or at each other, and `--report` is optional but must not collide with any of those paths.
 
+## Label closure heuristics
+
+Label the obvious closures in the RAG pool and flag the ambiguous ones for adjudication (see `docs/adr/0006-closure-heuristic-labels.md`):
+
+```sh
+uv run --package query query label-closure --in data/rag-pool.jsonl --out data/closure-labels.jsonl --report data/closure-report.json
+```
+
+Each output line is one Interaction's `{interaction_id, label, reason, needs_adjudication}`. The heuristics label 1,694 of the 3,000 RAG-pool Interactions definitively (190 Resolved, 1,317 Uncertain, 187 Unresolved); 1,306 (43.5%) are flagged for adjudication, 94% of them involving a move to DMs — the ambiguous middle reserved for ticket 7. A flagged record has `label: null` — it is not evidence of anything, and downstream stages must adjudicate it before it can be used. `--in` defaults to `data/rag-pool.jsonl`; `--out` and `--report` are optional and must not collide with `--in` or each other.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
