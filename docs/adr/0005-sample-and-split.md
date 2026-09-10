@@ -13,5 +13,6 @@ The two pools are written as separate JSONL files (`data/rag-pool.jsonl`, `data/
 ## Consequences
 
 - `data/rag-pool.jsonl` is the input contract for resolution labeling and the retrieval index (tickets 6–8, 15–17); `data/holdout.jsonl` is the input contract for the Golden Set (tickets 18–19). Both are the same normalized JSONL format as the English filter's output.
+- Input Interactions must have unique `interaction_id`s: the JSONL reader rejects duplicates, so the ranking cannot place one logical Interaction in both pools and the selection stays independent of input order even for concatenated or malformed files.
 - Selection is prefix-stable: increasing `--sample-size` with the same seed only adds Interactions, so the sample can grow without disturbing earlier picks.
 - When the input holds fewer Interactions than requested, the sample covers everything and the holdout scales down with the requested ratio (floored); the report states the actual sizes rather than pretending the target was met.

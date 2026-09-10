@@ -293,19 +293,27 @@ def read_interactions_jsonl(
     """Read Interactions back from the JSON Lines format written above.
 
     Inverse of :func:`write_interactions_jsonl`: parses every record and
-    validates its JSON Lines structure so downstream stages never see a
-    structurally malformed Interaction. Returns the Interactions in file order.
+    validates its JSON Lines structure and unique interaction ids so downstream
+    stages never see a structurally malformed Interaction. Returns the
+    Interactions in file order.
     """
     input_path = Path(input_path)
     if not input_path.is_file():
         raise InteractionsError(f"interactions JSONL does not exist: {input_path}")
     interactions = []
+    seen_ids: set[int] = set()
     with input_path.open("r", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
             location = f"line {line_number} of {input_path}"
-            interactions.append(_parse_interaction_line(line, location))
+            interaction = _parse_interaction_line(line, location)
+            if interaction.interaction_id in seen_ids:
+                raise InteractionsError(
+                    f"duplicate interaction_id {interaction.interaction_id} on {location}"
+                )
+            seen_ids.add(interaction.interaction_id)
+            interactions.append(interaction)
     return tuple(interactions)
 
 
