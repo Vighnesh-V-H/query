@@ -26,6 +26,7 @@ Use standard naming and commit message styles:
 - **Branch names:** `<type>/<short-description>` — e.g., `feat/customer-intake`, `fix/retry-logic`, `chore/update-docs`.
 - **Commit messages:** Conventional Commits format — `<type>: <short summary in lowercase>`, e.g., `feat: add ticket triage flow`, `fix: handle empty webhook payload`. Types: `feat`, `fix`, `chore`, `docs`, `refactor`, `test`.
 - Commit messages should be concise, imperative, and describe what the change does.
+- **Keep commits small.** One logical change per commit — never bundle an unrelated fix, refactor, or docs change into a feature commit. Big commits slow down gate review and make regressions hard to bisect.
 
 ## 4. Push through the no-mistakes gate
 
