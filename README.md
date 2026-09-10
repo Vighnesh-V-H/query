@@ -78,7 +78,7 @@ Label the obvious closures in the RAG pool and flag the ambiguous ones for adjud
 uv run --package query query label-closure --in data/rag-pool.jsonl --out data/closure-labels.jsonl --report data/closure-report.json
 ```
 
-Each output line is one Interaction's `{interaction_id, label, reason, needs_adjudication}`. The heuristics label 1,712 of the 3,000 RAG-pool Interactions definitively (211 Resolved, 1,231 Uncertain, 270 Unresolved); 1,288 (42.9%) are flagged for adjudication, 94% of them brand replies that move the conversation to DMs. A flagged record has `label: null` — it is not evidence of anything, and downstream stages must adjudicate it (ticket 7) before it can be used. `--in` defaults to `data/rag-pool.jsonl`; `--out` and `--report` are optional and must not collide with `--in` or each other.
+Each output line is one Interaction's `{interaction_id, label, reason, needs_adjudication}`. The heuristics label 1,695 of the 3,000 RAG-pool Interactions definitively (183 Resolved, 1,257 Uncertain, 255 Unresolved); 1,305 (43.5%) are flagged for adjudication, 94% of them involving a move to DMs — the ambiguous middle reserved for ticket 7. A flagged record has `label: null` — it is not evidence of anything, and downstream stages must adjudicate it before it can be used. `--in` defaults to `data/rag-pool.jsonl`; `--out` and `--report` are optional and must not collide with `--in` or each other.
 
 ## Model configuration
 
