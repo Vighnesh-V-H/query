@@ -1,0 +1,12 @@
+# no-mistakes gate configuration for this repository.
+# Trust rules: commands.* and no_ci are read from the default branch (main),
+# so these take effect for runs pushed after this file merges to main.
+#
+# This repo has no CI workflows yet; declare that so the CI monitor treats
+# an empty check list as green instead of parking forever.
+no_ci: true
+
+# Deterministic dependency + test command for the Python backend (uv workspace).
+# uv run auto-syncs the workspace before invoking pytest.
+commands:
+  test: "uv run pytest -q"
