@@ -21,7 +21,9 @@ The pass over the CSV works in stages:
 3. climb from each seed to its opening customer message: through intervening
    brand turns and through same-author ancestors that also engage the Brand
 4. grow each opening into a dyad: tweets by the customer author or the Brand
-5. emit an Interaction when the dyad holds at least one brand turn
+5. drop openings that lie inside another opening's dyad (continuations, not
+   new Interactions) so every turn belongs to exactly one Interaction
+6. emit an Interaction when the dyad holds at least one brand turn
 
 An Interaction must contain at least one brand turn: without a brand reply no
 closure verdict (Resolved / Uncertain / Unresolved) can ever be produced, so the
@@ -98,6 +100,7 @@ class InteractionsReport:
     brand_rows: int
     seed_count: int
     opening_count: int
+    absorbed_openings: int
     interactions: int
     unanswered_openings: int
     turns_total: int
@@ -167,17 +170,31 @@ def build_interactions(
     for seed in seeds:
         opening_of_seed[seed] = _climb_to_opening(seed, rows, brand_replied_to, brand_id)
 
+    dyad_of_opening: dict[int, set[int]] = {}
+    for opening in set(opening_of_seed.values()):
+        dyad_of_opening[opening] = _grow_dyad(
+            opening, rows, children, rows[opening].author_id, brand_id
+        )
+
+    # An opening that lies inside another opening's dyad is a continuation of
+    # that Interaction, not a new one (its dyad is a subset of the container's).
+    # Dropping it keeps the emitted Interactions pairwise disjoint, so no turn
+    # is ever counted twice.
+    absorbed_openings = set()
+    for opening, dyad in dyad_of_opening.items():
+        for other in dyad:
+            if other != opening and other in dyad_of_opening:
+                absorbed_openings.add(other)
+
     interactions: list[Interaction] = []
     unanswered_openings = 0
     turns_total = 0
     turns_customer = 0
     turns_brand = 0
-    seen_openings: set[int] = set()
-    for opening in sorted(opening_of_seed.values()):
-        if opening in seen_openings:
+    for opening in sorted(dyad_of_opening):
+        if opening in absorbed_openings:
             continue
-        seen_openings.add(opening)
-        dyad = _grow_dyad(opening, rows, children, rows[opening].author_id, brand_id)
+        dyad = dyad_of_opening[opening]
         brand_turn_ids = [t for t in dyad if rows[t].author_id == brand_id]
         if not brand_turn_ids:
             unanswered_openings += 1
@@ -211,7 +228,8 @@ def build_interactions(
         inbound_rows=inbound_rows,
         brand_rows=brand_rows,
         seed_count=len(seeds),
-        opening_count=len(seen_openings),
+        opening_count=len(dyad_of_opening),
+        absorbed_openings=len(absorbed_openings),
         interactions=len(interactions),
         unanswered_openings=unanswered_openings,
         turns_total=turns_total,

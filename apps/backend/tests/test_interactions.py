@@ -293,6 +293,55 @@ class TestBuildInteractions:
         assert found[0].interaction_id == 1
         assert [t.tweet_id for t in found[0].turns] == [1, 2, 3]
 
+    def test_opening_inside_another_dyad_is_absorbed(self, tmp_path):
+        # regression (real-data bug): the customer's middle tweet carries no
+        # brand mention and no brand reply, so a climb from a later seed stops
+        # at it — but dyad growth absorbs by author only, so the later seed's
+        # chain is already inside the first dyad. The later opening must be
+        # absorbed, and no turn may be counted twice.
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            # opening: customer mentions the brand
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares downloaded songs choppy"', ""),
+            # middle: customer detail tweet, NOT a seed (no mention, no brand
+            # reply to it, parent is not the brand)
+            _row(2, "cust", "True", _dt(11), '"also running iOS 11"', 1),
+            # later seed: customer mentions the brand again; climb stops at 2
+            _row(3, "cust", "True", _dt(12), '"@SpotifyCares still choppy after reinstall"', 2),
+            # brand answers the later tweet, giving that opening a brand turn
+            _row(4, BRAND, "False", _dt(13), '"@cust we are on it"', 3),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.opening_count == 2
+        assert report.absorbed_openings == 1
+        assert report.interactions == 1
+        assert found[0].interaction_id == 1
+        assert sorted(t.tweet_id for t in found[0].turns) == [1, 2, 3, 4]
+
+    def test_emitted_interactions_are_pairwise_disjoint(self, tmp_path):
+        # global invariant: no tweet may appear in two Interactions
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares downloaded songs choppy"', ""),
+            _row(2, "cust", "True", _dt(11), '"also running iOS 11"', 1),
+            _row(3, "cust", "True", _dt(12), '"@SpotifyCares still choppy after reinstall"', 2),
+            _row(4, BRAND, "False", _dt(13), '"@cust we are on it"', 3),
+            # an unrelated second interaction for a different customer
+            _row(5, "other", "True", _dt(14), '"@SpotifyCares me too"', ""),
+            _row(6, BRAND, "False", _dt(15), '"@other dm us"', 5),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.interactions == 2
+        seen: set[int] = set()
+        for interaction in found:
+            for turn in interaction.turns:
+                assert turn.tweet_id not in seen, "tweet in two Interactions"
+                seen.add(turn.tweet_id)
+
     def test_brand_self_reply_chain_in_dyad(self, tmp_path):
         # downward brand->brand self-replies after the customer turn are part
         # of the same Interaction
