@@ -14,7 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     smoke.add_argument("--role", default="generator", choices=list(config.ROLES))
 
     read_source = sub.add_parser(
-        "read-source", help="extract the source archive and report its CSV contents"
+        "read-source", help="report cached CSV paths, schemas, and row counts"
     )
     read_source.add_argument(
         "--archive",
