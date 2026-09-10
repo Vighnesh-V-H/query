@@ -44,7 +44,7 @@ def read_source_archive(
     archive_path: Path = DEFAULT_ARCHIVE_PATH,
     extract_dir: Path = DEFAULT_EXTRACT_DIR,
 ) -> SourceReport:
-    """Extract a source archive once and report the CSV schemas and row counts."""
+    """Cache a matching archive extraction and report CSV schemas and row counts."""
     archive_path = Path(archive_path).resolve()
     extract_dir = Path(extract_dir).resolve()
     if not archive_path.is_file():

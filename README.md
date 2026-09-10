@@ -37,7 +37,7 @@ With the provided `data/archive.zip` in place, extract and inspect the raw CSV f
 uv run --package query query read-source
 ```
 
-The extracted files and their schema/count manifest are cached in `data/raw/`; rerunning the command reports the cache without extracting again. Use `--archive` and `--extract-dir` to override the defaults.
+The extracted files and their schema/count manifest are cached in `data/raw/`; rerunning the command with the same archive and an intact cache reports the cache without extracting again. A changed archive or modified cached CSV file is extracted again. Use `--archive` and `--extract-dir` to override the defaults.
 
 ## Model configuration
 
