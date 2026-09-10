@@ -1,9 +1,11 @@
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 
-from query import config, interactions, llm, source
+from query import config, english, interactions, llm, source
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,6 +60,30 @@ def main(argv: list[str] | None = None) -> int:
         help="optional path to write Interactions as JSON Lines",
     )
 
+    filter_english_parser = sub.add_parser(
+        "filter-english",
+        help="drop non-English Interactions and report retained vs filtered volume",
+    )
+    filter_english_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=interactions.DEFAULT_INTERACTIONS_PATH,
+        help=f"Interactions JSONL path (default: {interactions.DEFAULT_INTERACTIONS_PATH})",
+    )
+    filter_english_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="optional path to write retained Interactions as JSON Lines",
+    )
+    filter_english_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the filter report as JSON",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "smoke-llm":
@@ -108,8 +134,7 @@ def main(argv: list[str] | None = None) -> int:
                     "turns_customer": report.turns_customer,
                     "turns_brand": report.turns_brand,
                 }
-                args.report.parent.mkdir(parents=True, exist_ok=True)
-                args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                _write_json_report(args.report, payload)
         except (interactions.InteractionsError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -130,7 +155,71 @@ def main(argv: list[str] | None = None) -> int:
             print(f"interactions written: {output_path}")
         return 0
 
+    if args.command == "filter-english":
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            retained, report = english.filter_english(found)
+            output_path = (
+                interactions.write_interactions_jsonl(retained, args.out)
+                if args.out
+                else None
+            )
+            if args.report:
+                payload = {
+                    "total": report.total,
+                    "retained": report.retained,
+                    "filtered": report.filtered,
+                    "filter_rate": report.filter_rate,
+                    "no_signal": report.no_signal,
+                    "filtered_by_language": dict(report.filtered_by_language),
+                }
+                _write_json_report(args.report, payload)
+        except (interactions.InteractionsError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            f"input: {args.input} ({report.total} interactions)",
+            f"retained: {report.retained} "
+            f"(english {report.retained - report.no_signal}, "
+            f"no confident signal {report.no_signal})",
+            f"filtered: {report.filtered} ({report.filter_rate:.2%})",
+        ]
+        if report.filtered_by_language:
+            breakdown = ", ".join(
+                f"{language} {count}" for language, count in report.filtered_by_language.items()
+            )
+            lines.append(f"filtered by language: {breakdown}")
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if output_path is not None:
+            print(f"interactions written: {output_path}")
+        return 0
+
     raise SystemExit(f"unknown command: {args.command}")
+
+
+def _write_json_report(path: Path, payload: dict) -> None:
+    """Write a JSON report, swapping the file in atomically.
+
+    Mirrors the JSONL writer: a failed or interrupted write must not truncate
+    the previous report.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    file_descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(payload, indent=2) + "\n")
+        os.replace(temporary_name, path)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
 
 
 if __name__ == "__main__":

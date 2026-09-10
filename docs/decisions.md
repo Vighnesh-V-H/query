@@ -22,7 +22,7 @@ Non-obvious decisions made while building Query v0, and why. (Assignment deliver
 
 10. **Minimal tweet cleaning.** Mentions and truncated URLs stripped; emoji, casing, and tone kept — they are signal for brand-consistency scoring. Aggressive normalization is scoped to the TF-IDF baseline only.
 
-11. **English-only filter for v0.** One LLM classifying Spanish messages against an English taxonomy fails quietly; documented as a scope limit with filtered volume reported.
+11. **English-only filter for v0.** One LLM classifying Spanish messages against an English taxonomy fails quietly; the filter drops only confidently non-English opening messages and reports the 2.24% it removed by language (plus the ambiguous short messages it keeps). See `docs/adr/0004-english-filter.md`.
 
 12. **Intent taxonomy: clustering discovered, domain knowledge reconciled.** Embedding clusters name candidate intents; a seeded domain list (login, billing, playback, premium…) acts as a sanity checklist. Neither alone is defensible.
 
