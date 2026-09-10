@@ -330,26 +330,7 @@ Explicitly discuss dataset imbalance, evaluation limitations, leakage, judge rel
 
 # 12. Repository Structure
 
-```text
-hiver-support-agent/
-│
-├── data/
-├── src/
-│   ├── preprocessing/
-│   ├── classification/
-│   ├── retrieval/
-│   ├── generation/
-│   ├── escalation/
-│   └── evaluation/
-│
-├── tests/
-├── golden_set/
-├── notebooks/
-├── configs/
-├── README.md
-├── REPORT.md
-└── requirements.txt
-```
+The implementation layout is maintained in [ADR-0002](adr/0002-monorepo-layout.md).
 
 The README must allow the headline evaluation to be reproduced in **<15 minutes** on the provided subset.
 

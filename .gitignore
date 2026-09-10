@@ -2,6 +2,8 @@ data/
 .scratch/
 .env
 __pycache__/
-node_modules/
+*.egg-info/
 .venv/
+.pytest_cache/
+node_modules/
 src/query.egg-info/

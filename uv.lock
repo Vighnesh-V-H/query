@@ -6,6 +6,12 @@ resolution-markers = [
     "python_full_version < '3.12' or sys_platform != 'emscripten'",
 ]
 
+[manifest]
+members = [
+    "query",
+    "query-monorepo",
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.8.0"
@@ -433,7 +439,7 @@ wheels = [
 [[package]]
 name = "query"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "apps/backend" }
 dependencies = [
     { name = "openai" },
     { name = "python-dotenv" },
@@ -453,6 +459,27 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "query-monorepo"
+version = "0.0.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "query" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "query", editable = "apps/backend" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+]
 
 [[package]]
 name = "sniffio"
