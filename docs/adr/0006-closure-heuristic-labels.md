@@ -13,7 +13,7 @@ Ticket 6 gives every RAG-pool Interaction a closure verdict (ADR-0001). The keyw
 
 Every verdict carries a fixed reason string, written per Interaction to `data/closure-labels.jsonl` as `{interaction_id, label, reason, needs_adjudication}`.
 
-Closing courtesies are not completion claims: "you're welcome" or "glad to hear" only count next to a customer acknowledgement, so a courtesy with no acknowledgement is Uncertain rather than a guessed Resolved. Two more rules keep false Resolved labels out of the RAG index: a thank-you only counts as acknowledgement when it is essentially the whole message (long messages usually carry a new request with the courtesy attached), and the opening customer message can never acknowledge help it has not received. Apostrophes are normalized before matching because the dataset mixes straight and typographic ones.
+Closing courtesies are not completion claims: "you're welcome" or "glad to hear" only count next to a customer acknowledgement, so a courtesy with no acknowledgement is Uncertain rather than a guessed Resolved; a courtesy or sign-off next to a request for information or a promise to investigate is still Uncertain, because the issue is open. Two more rules keep false Resolved labels out of the RAG index: a thank-you only counts as acknowledgement when it is essentially the whole message (long messages usually carry a new request with the courtesy attached), and the opening customer message can never acknowledge help it has not received. A negated fix ("it hasn't been fixed yet") is a continuation, not an acknowledgement, and apostrophes are normalized before matching because the dataset mixes straight and typographic ones.
 
 The ambiguous middle is flagged, not guessed: brand replies that move the conversation to DMs, customer messages that only announce a DM, and customer closings that neither acknowledge nor continue get `label: null`, `needs_adjudication: true`, and a reason. This is how ADR-0001's "silence endings" are read here: a plain answer-then-silence has no hidden branch and is Uncertain by the taxonomy's definition, while a DM move can hide the outcome in a private conversation no later stage can read — that is the ambiguity ticket 7's labeler adjudicates.
 
@@ -26,6 +26,6 @@ The ambiguous middle is flagged, not guessed: brand replies that move the conver
 
 ## Consequences
 
-- The run labels 1,695 of 3,000 Interactions (56.5%) definitively — 183 Resolved, 1,257 Uncertain, 255 Unresolved — and flags 1,305 (43.5%), of which 1,225 (94%) involve a move to DMs. Among endings that never touch DMs, 95.5% get a definitive label.
+- The run labels 1,695 of 3,000 Interactions (56.5%) definitively — 190 Resolved, 1,250 Uncertain, 255 Unresolved — and flags 1,305 (43.5%), of which 1,225 (94%) involve a move to DMs. Among endings that never touch DMs, 95.5% get a definitive label.
 - `data/closure-labels.jsonl` is the input contract for ticket 7 (adjudication) and ticket 8 (resolution dataset). Flagged records have `label: null`: a consumer that only understands labels must skip them, never default them.
-- Only Resolved Cases (the 183 heuristic ones plus whatever ticket 7 recovers) become retrieval-eligible Historical Cases; Uncertain and Unresolved never enter the index (decision 4).
+- Only Resolved Cases (the 190 heuristic ones plus whatever ticket 7 recovers) become retrieval-eligible Historical Cases; Uncertain and Unresolved never enter the index (decision 4).
