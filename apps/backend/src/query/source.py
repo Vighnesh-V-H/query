@@ -53,6 +53,7 @@ def read_source_archive(
         raise SourceArchiveError("extraction directory cannot contain the source archive")
 
     temporary_dir = None
+    previous_dir = None
     try:
         signature = _file_signature(archive_path)
         cached_files = _read_cached_report(extract_dir, signature)
@@ -77,8 +78,13 @@ def read_source_archive(
                 raise SourceArchiveError(
                     f"refusing to replace unmanaged extraction directory: {extract_dir}"
                 )
-            shutil.rmtree(extract_dir)
+            previous_dir = extract_dir.with_name(extract_dir.name + ".previous")
+            if previous_dir.exists():
+                shutil.rmtree(previous_dir, ignore_errors=True)
+            extract_dir.rename(previous_dir)
         os.replace(temporary_dir, extract_dir)
+        if previous_dir is not None:
+            shutil.rmtree(previous_dir, ignore_errors=True)
     except (
         OSError,
         ValueError,
@@ -188,6 +194,8 @@ def _scan_csv_files(extract_dir: Path) -> tuple[CsvReport, ...]:
                 raise SourceArchiveError(f"CSV file has an invalid header: {path}")
             rows = 0
             for row in reader:
+                if not row:
+                    continue
                 rows += 1
                 if len(row) != len(columns):
                     raise SourceArchiveError(

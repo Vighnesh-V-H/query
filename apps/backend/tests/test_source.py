@@ -144,3 +144,45 @@ def test_read_source_command_prints_report(tmp_path, capsys):
     assert "schema: twcs/twcs.csv -> tweet_id, author_id, inbound, text" in output
     assert "rows: twcs/twcs.csv -> 2" in output
     assert "total rows across CSV files: 2" in output
+
+def test_read_source_archive_invalidates_cache_when_archive_changes(tmp_path):
+    archive_path = tmp_path / "archive.zip"
+    extract_dir = tmp_path / "raw"
+    _write_archive(archive_path)
+    first = source.read_source_archive(archive_path, extract_dir)
+    assert first.extracted is True
+
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "twcs/twcs.csv",
+            "tweet_id,author_id,inbound,text\n"
+            "1,customer,true,Where is my receipt?\n"
+            "2,brand,false,We sent it by email.\n"
+            "3,customer,true,Still waiting.\n",
+        )
+
+    second = source.read_source_archive(archive_path, extract_dir)
+
+    assert second.extracted is True
+    assert second.total_rows == 3
+    assert (extract_dir / "twcs" / "twcs.csv").read_text(encoding="utf-8").endswith("Still waiting.\n")
+
+
+def test_read_source_archive_missing_archive_raises(tmp_path):
+    try:
+        source.read_source_archive(tmp_path / "missing.zip", tmp_path / "raw")
+    except source.SourceArchiveError:
+        pass
+    else:
+        raise AssertionError("expected missing archive to be rejected")
+
+
+def test_read_source_archive_corrupt_zip_raises(tmp_path):
+    archive_path = tmp_path / "archive.zip"
+    archive_path.write_bytes(b"not a zip file")
+    try:
+        source.read_source_archive(archive_path, tmp_path / "raw")
+    except source.SourceArchiveError:
+        pass
+    else:
+        raise AssertionError("expected corrupt archive to be rejected")
