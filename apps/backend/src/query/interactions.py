@@ -384,12 +384,14 @@ def _climb_to_opening(
         if parent is None:
             return opening
         if parent.author_id == brand_id:
+            visited.add(parent_id)
             current = parent_id
             continue
         if (
             parent.author_id == author
             and _is_seed(parent, rows, brand_replied_to, brand_id)
         ):
+            visited.add(parent_id)
             current = parent_id
             opening = parent_id
             continue
