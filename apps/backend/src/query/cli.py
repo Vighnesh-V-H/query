@@ -405,15 +405,25 @@ def _sample_split_path_error(
     """Reject sample-split outputs that would clobber an input or each other."""
     if (rag_out is None) != (holdout_out is None):
         return "provide both --rag-out and --holdout-out, or neither"
-    return _output_paths_error(input_path, rag_out, holdout_out, report)
+    return _output_paths_error(
+        input_path,
+        rag_out,
+        holdout_out,
+        report,
+        message="sample outputs must be distinct from each other and from --in",
+    )
 
 
-def _output_paths_error(input_path: Path, *outputs: Path | None) -> str | None:
+def _output_paths_error(
+    input_path: Path,
+    *outputs: Path | None,
+    message: str = "outputs must be distinct from each other and from --in",
+) -> str | None:
     """Reject outputs that would clobber the input or each other."""
     provided = [path for path in outputs if path is not None]
     resolved = [path.resolve() for path in provided] + [input_path.resolve()]
     if len(set(resolved)) != len(resolved):
-        return "outputs must be distinct from each other and from --in"
+        return message
     return None
 
 
