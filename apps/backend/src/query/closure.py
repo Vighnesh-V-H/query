@@ -118,13 +118,14 @@ ACK_PATTERN = re.compile(
 )
 # The customer keeps asking: a question, a repeated complaint, a demand.
 CONTINUATION_PATTERN = re.compile(
-    r"(\?|still |not work|doesn'?t work|didn'?t work|any update|any news|"
+    r"(\?|not work|doesn'?t work|didn'?t work|any update|any news|"
     r"any chance|when will|how long|how many|same (?:issue|problem)|"
     r"nothing (?:happened|changed)|yet to|waiting|waited|no (?:reply|response|answer|one)|"
     r"please (?:help|fix|reply|respond)|help me|"
     r"can'?t (?:log|sign|access|play|use|find|see|get)|"
     r"cannot (?:log|sign|access|play|use|find|see|get)|"
-    r"still (?:can'?t|cannot|not|waiting|broken|the same|an issue|having)|"
+    r"still (?:can'?t|cannot|not|no |never |waiting|broken|broke|"
+    r"crash(?:es|ing|ed)?|having|down|happening|gone|the same|an issue|a problem)|"
     r"i (?:have|'?ve got|got) (?:an? )?(?:issue|problem)|"
     r"the (?:issue|problem) (?:is|persists|remains)|"
     r"not (?:sure|solved|resolved)|"
@@ -162,7 +163,7 @@ THANKS_ANYWAY_PATTERN = re.compile(r"thanks? (?:anyway|anyways)", re.IGNORECASE)
 REFUSAL_PATTERN = re.compile(
     r"(unfortunately|we'?re afraid|we (?:can'?t|cannot|won'?t)|i'?m afraid|"
     r"(?:we|we do not|we don'?t) (?:currently )?(?:have|offer|support)(?: any)?|"
-    r"no updates?|not available|unable to|not something we|outside of our|"
+    r"not available|unable to|not something we|outside of our|"
     r"not possible|we'?re not able|isn'?t (?:something|available)|"
     r"don'?t (?:currently )?(?:have|offer|support)|we don'?t have any)",
     re.IGNORECASE,
@@ -188,7 +189,8 @@ FOLLOWUP_PATTERN = re.compile(
     r"pass|share|let|make sure|get .{0,20}passed)|"
     r"pass(?:ed)? (?:this|it|your .{0,20})? ?(?:on |onto )?to the (?:right )?team|"
     r"make sure to (?:pass|share|let)|"
-    r"let the right (?:team|folks) know|we'?ll keep (?:an? )?(?:eye|ear)|"
+    r"let the right (?:team|folks) know|we'?ll keep (?:you (?:posted|updated)|"
+    r"(?:an? )?(?:eye|ear))|"
     r"our team is|we are (?:looking|investigating))",
     re.IGNORECASE,
 )

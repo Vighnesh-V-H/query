@@ -96,6 +96,79 @@ class TestLabelClosures:
 
         assert labels[0].label == "unresolved"
 
+    def test_positive_close_with_still_is_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "login is broken"),
+                _turn(2, "brand", "Try resetting your password."),
+                _turn(3, "customer", "Thanks, still love Spotify!"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "resolved"
+        assert labels[0].needs_adjudication is False
+
+    def test_negative_still_continuations_are_unresolved(self):
+        closings = [
+            "Thanks, but still no luck",
+            "Still broken after the reinstall",
+            "Still waiting on a fix here",
+            "The app still crashes on open",
+            "I'm still having the same problem",
+            "Still not working after the update",
+            "The service is still down for me",
+            "This is still happening today",
+        ]
+        found = tuple(
+            _interaction(
+                index,
+                _turn(1, "customer", "login is broken"),
+                _turn(2, "brand", "Try resetting your password."),
+                _turn(3, "customer", closing),
+            )
+            for index, closing in enumerate(closings, start=1)
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert [label.label for label in labels] == ["unresolved"] * len(closings)
+
+    def test_brand_without_updates_is_unresolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "is there an ETA for the fix?"),
+                _turn(2, "brand", "We don't have any updates on this."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "unresolved"
+        assert labels[0].needs_adjudication is False
+
+    def test_brand_deferral_without_updates_is_uncertain_followup(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "is there an ETA for the fix?"),
+                _turn(
+                    2,
+                    "brand",
+                    "No updates yet on this, we'll keep you posted.",
+                ),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].needs_adjudication is False
+        assert labels[0].reason == closure_mod.REASON_BRAND_FOLLOWUP
+
     def test_customer_fixed_but_continues_is_unresolved(self):
         found = (
             _interaction(
