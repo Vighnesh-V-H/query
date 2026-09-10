@@ -47,3 +47,11 @@ _Avoid_: sensitive topic
 **Golden Set**:
 The hand-labelled evaluation examples built by us, with gold intent and gold auto/escalate labels.
 _Avoid_: test set, ground truth (unqualified)
+
+**RAG Pool**:
+The ~3,000 sampled Interactions retrieval draws its evidence from; only their Resolved Cases become Historical Cases.
+_Avoid_: sample, training set
+
+**Holdout**:
+The ~1,000 sampled Interactions reserved for the Golden Set and never retrieved as evidence.
+_Avoid_: test set, held-out data

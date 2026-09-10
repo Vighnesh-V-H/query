@@ -5,7 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from query import config, english, interactions, llm, source
+from query import config, english, interactions, llm, sampling, source
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,6 +82,54 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write the filter report as JSON",
+    )
+
+    sample_split_parser = sub.add_parser(
+        "sample-split",
+        help="draw a deterministic sample and split it into RAG pool and holdout",
+    )
+    sample_split_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=sampling.DEFAULT_INPUT_PATH,
+        help=f"Interactions JSONL path (default: {sampling.DEFAULT_INPUT_PATH})",
+    )
+    sample_split_parser.add_argument(
+        "--seed",
+        type=int,
+        default=sampling.DEFAULT_SEED,
+        help=f"sampling seed (default: {sampling.DEFAULT_SEED})",
+    )
+    sample_split_parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=sampling.DEFAULT_SAMPLE_SIZE,
+        help=f"Interactions to sample (default: {sampling.DEFAULT_SAMPLE_SIZE})",
+    )
+    sample_split_parser.add_argument(
+        "--holdout-size",
+        type=int,
+        default=sampling.DEFAULT_HOLDOUT_SIZE,
+        help=f"Interactions reserved as holdout (default: {sampling.DEFAULT_HOLDOUT_SIZE})",
+    )
+    sample_split_parser.add_argument(
+        "--rag-out",
+        type=Path,
+        default=None,
+        help="optional path to write the RAG pool as JSON Lines",
+    )
+    sample_split_parser.add_argument(
+        "--holdout-out",
+        type=Path,
+        default=None,
+        help="optional path to write the holdout as JSON Lines",
+    )
+    sample_split_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the sample report as JSON",
     )
 
     args = parser.parse_args(argv)
@@ -197,7 +245,82 @@ def main(argv: list[str] | None = None) -> int:
             print(f"interactions written: {output_path}")
         return 0
 
+    if args.command == "sample-split":
+        problem = _sample_split_path_error(
+            args.input, args.rag_out, args.holdout_out, args.report
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            rag_pool, holdout, report = sampling.sample_and_split(
+                found,
+                seed=args.seed,
+                sample_size=args.sample_size,
+                holdout_size=args.holdout_size,
+            )
+            rag_path = (
+                interactions.write_interactions_jsonl(rag_pool, args.rag_out)
+                if args.rag_out
+                else None
+            )
+            holdout_path = (
+                interactions.write_interactions_jsonl(holdout, args.holdout_out)
+                if args.holdout_out
+                else None
+            )
+            if args.report:
+                payload = {
+                    "seed": report.seed,
+                    "input_total": report.input_total,
+                    "sample_size": report.sample_size,
+                    "sampled": report.sampled,
+                    "sample_rate": report.sample_rate,
+                    "rag_pool": report.rag_pool,
+                    "holdout": report.holdout,
+                }
+                _write_json_report(args.report, payload)
+        except (interactions.InteractionsError, sampling.SamplingError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            f"input: {args.input} ({report.input_total} interactions)",
+            f"seed: {report.seed}",
+            (
+                f"sampled: {report.sampled} of {report.input_total} "
+                f"({report.sample_rate:.2%})"
+            ),
+            f"rag pool: {report.rag_pool} interactions",
+            f"holdout: {report.holdout} interactions",
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if rag_path is not None:
+            print(f"rag pool written: {rag_path}")
+        if holdout_path is not None:
+            print(f"holdout written: {holdout_path}")
+        return 0
+
     raise SystemExit(f"unknown command: {args.command}")
+
+
+def _sample_split_path_error(
+    input_path: Path,
+    rag_out: Path | None,
+    holdout_out: Path | None,
+    report: Path | None,
+) -> str | None:
+    """Reject sample-split outputs that would clobber an input or each other."""
+    if (rag_out is None) != (holdout_out is None):
+        return "provide both --rag-out and --holdout-out, or neither"
+    outputs = [path for path in (rag_out, holdout_out, report) if path is not None]
+    resolved = [path.resolve() for path in outputs] + [input_path.resolve()]
+    if len(set(resolved)) != len(resolved):
+        return "sample outputs must be distinct from each other and from --in"
+    return None
 
 
 def _write_json_report(path: Path, payload: dict) -> None:
