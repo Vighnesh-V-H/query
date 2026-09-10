@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from query import config, interactions, llm, source
+from query import config, english, interactions, llm, source
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,6 +56,30 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write Interactions as JSON Lines",
+    )
+
+    filter_english_parser = sub.add_parser(
+        "filter-english",
+        help="drop non-English Interactions and report retained vs filtered volume",
+    )
+    filter_english_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=interactions.DEFAULT_INTERACTIONS_PATH,
+        help=f"Interactions JSONL path (default: {interactions.DEFAULT_INTERACTIONS_PATH})",
+    )
+    filter_english_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="optional path to write retained Interactions as JSON Lines",
+    )
+    filter_english_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the filter report as JSON",
     )
 
     args = parser.parse_args(argv)
@@ -122,6 +146,49 @@ def main(argv: list[str] | None = None) -> int:
             f"unanswered openings: {report.unanswered_openings}",
             f"turns: {report.turns_total} (customer {report.turns_customer}, brand {report.turns_brand})",
         ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if output_path is not None:
+            print(f"interactions written: {output_path}")
+        return 0
+
+    if args.command == "filter-english":
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            retained, report = english.filter_english(found)
+            output_path = (
+                interactions.write_interactions_jsonl(retained, args.out)
+                if args.out
+                else None
+            )
+            if args.report:
+                payload = {
+                    "total": report.total,
+                    "retained": report.retained,
+                    "filtered": report.filtered,
+                    "filter_rate": report.filter_rate,
+                    "no_signal": report.no_signal,
+                    "filtered_by_language": dict(report.filtered_by_language),
+                }
+                args.report.parent.mkdir(parents=True, exist_ok=True)
+                args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except (interactions.InteractionsError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            f"input: {args.input} ({report.total} interactions)",
+            f"retained: {report.retained} "
+            f"(english {report.retained - report.no_signal}, "
+            f"no confident signal {report.no_signal})",
+            f"filtered: {report.filtered} ({report.filter_rate:.2%})",
+        ]
+        if report.filtered_by_language:
+            breakdown = ", ".join(
+                f"{language} {count}" for language, count in report.filtered_by_language.items()
+            )
+            lines.append(f"filtered by language: {breakdown}")
         for line in lines:
             print(line)
         if args.report:
