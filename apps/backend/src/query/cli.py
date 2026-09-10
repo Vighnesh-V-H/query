@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> int:
                 "inbound_rows": report.inbound_rows,
                 "brand_rows": report.brand_rows,
                 "seed_count": report.seed_count,
-                "openings": report.opening_count,
+                "opening_count": report.opening_count,
                 "absorbed_openings": report.absorbed_openings,
                 "interactions": report.interactions,
                 "unanswered_openings": report.unanswered_openings,

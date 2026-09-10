@@ -37,6 +37,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_TWCS_PATH = REPO_ROOT / "data" / "raw" / "twcs" / "twcs.csv"
@@ -63,7 +64,7 @@ class Turn:
 
     tweet_id: int
     author_id: str
-    side: str  # "customer" or "brand"
+    side: Literal["customer", "brand"]
     created_at: datetime
     text: str
 
@@ -327,37 +328,34 @@ def _find_seeds(
 
     A seed engages the Brand when its text mentions the Brand handle, when the
     Brand replied to it, or when it replies to a Brand tweet. Mention matching
-    requires a whole handle (``@brand`` at the start of the text, ending at a
+    requires a whole handle (``@brand`` anywhere in the text, ending at a
     handle boundary) so a handle like ``@SpotifyCaresHelp`` is not matched by
     ``@SpotifyCares``.
     """
-    mention = "@" + brand_id.lower()
     seeds: set[int] = set()
     for tweet in rows.values():
-        if not tweet.inbound or tweet.author_id == brand_id:
-            continue
-        if _mentions_brand(tweet.text, mention):
+        if _is_seed(tweet, rows, brand_replied_to, brand_id):
             seeds.add(tweet.tweet_id)
-        elif tweet.tweet_id in brand_replied_to:
-            seeds.add(tweet.tweet_id)
-        else:
-            parent = rows.get(tweet.parent_id) if tweet.parent_id is not None else None
-            if parent is not None and parent.author_id == brand_id:
-                seeds.add(tweet.tweet_id)
     return seeds
 
 
 def _mentions_brand(text: str, mention: str) -> bool:
     """True when the tweet text mentions the Brand handle as a whole handle.
 
-    The mention must start the text and end at a handle boundary, so
-    ``@SpotifyCaresHelp`` is NOT matched by ``@SpotifyCares``.
+    The mention may appear anywhere in the text (replies put it first, but
+    fresh mentions often trail the message), and must end at a handle
+    boundary, so ``@SpotifyCaresHelp`` is NOT matched by ``@SpotifyCares``.
     """
     lowered = text.lower()
-    if not lowered.startswith(mention):
-        return False
-    rest = lowered[len(mention):]
-    return not rest or not (rest[0].isalnum() or rest[0] == "_")
+    start = 0
+    while True:
+        index = lowered.find(mention, start)
+        if index == -1:
+            return False
+        rest = lowered[index + len(mention):]
+        if not rest or not (rest[0].isalnum() or rest[0] == "_"):
+            return True
+        start = index + 1
 
 
 def _climb_to_opening(

@@ -210,8 +210,9 @@ class TestBuildInteractions:
         assert first.interaction_id == 2
         assert [t.tweet_id for t in first.turns] == [2, 3]
 
-    def test_mention_prefix_match_is_exact(self, tmp_path):
-        # @SpotifyCaresHelp is a different handle and must NOT match
+    def test_mention_match_is_whole_handle(self, tmp_path):
+        # @SpotifyCaresHelp is a different handle and must NOT match,
+        # even though it starts with the brand handle
         csv_path = tmp_path / "twcs.csv"
         _write_csv(csv_path, [
             _row(1, "cust", "True", _dt(10), '"@SpotifyCaresHelp you there?"', ""),
@@ -221,6 +222,21 @@ class TestBuildInteractions:
         found, report = interactions_mod.build_interactions(csv_path, BRAND)
 
         # the brand reply seeds via adjacency even though the mention missed
+        assert report.interactions == 1
+        assert found[0].interaction_id == 1
+
+    def test_mid_text_mention_seeds(self, tmp_path):
+        # a whole-handle mention need not start the text (replies put the
+        # handle first; fresh mentions often trail the message)
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"my app broke @SpotifyCares, help?"', ""),
+            _row(2, BRAND, "False", _dt(11), '"@cust on it"', 1),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.seed_count == 1
         assert report.interactions == 1
         assert found[0].interaction_id == 1
 
