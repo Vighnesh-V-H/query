@@ -269,6 +269,28 @@ def write_interactions_jsonl(
     format downstream stages (English filter, sampling) consume.
     """
     output_path = Path(output_path)
+    temporary_path = stage_interactions_jsonl(interactions, output_path)
+    try:
+        os.replace(temporary_path, output_path)
+    except BaseException:
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            pass
+        raise
+    return output_path
+
+
+def stage_interactions_jsonl(
+    interactions: tuple[Interaction, ...], output_path: Path | str
+) -> Path:
+    """Write Interactions to a temporary sibling, ready to be swapped in.
+
+    Callers that must update several files as one transaction stage every
+    output first and then swap the returned paths in together, so a write
+    failure cannot leave a partial set of new files behind.
+    """
+    output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output_path.name}.", suffix=".tmp", dir=output_path.parent
@@ -277,14 +299,13 @@ def write_interactions_jsonl(
         with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as handle:
             for interaction in interactions:
                 handle.write(json.dumps(interaction_to_json(interaction)) + "\n")
-        os.replace(temporary_name, output_path)
     except BaseException:
         try:
             os.unlink(temporary_name)
         except OSError:
             pass
         raise
-    return output_path
+    return Path(temporary_name)
 
 
 def read_interactions_jsonl(

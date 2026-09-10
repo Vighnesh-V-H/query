@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -328,9 +329,21 @@ class TestSampleSplitCli:
         ) == 1
         assert "error:" in capsys.readouterr().err
 
-    def test_write_error_returns_1(self, tmp_path, capsys):
+    def test_duplicate_interaction_ids_return_1(self, tmp_path, capsys):
+        input_path = self._write_input(tmp_path, (_interaction(1), _interaction(1)))
+
+        assert cli.main(["sample-split", "--in", str(input_path)]) == 1
+        assert "duplicate interaction_id" in capsys.readouterr().err
+
+    def test_staging_failure_leaves_outputs_untouched(self, tmp_path, capsys):
         found = tuple(_interaction(i) for i in range(1, 6))
         input_path = self._write_input(tmp_path, found)
+        rag_path = tmp_path / "rag-pool.jsonl"
+        holdout_path = tmp_path / "holdout.jsonl"
+        report_path = tmp_path / "sample-report.json"
+        rag_path.write_text('{"previous": "rag"}\n', encoding="utf-8")
+        holdout_path.write_text('{"previous": "holdout"}\n', encoding="utf-8")
+        report_path.write_text('{"previous": "report"}\n', encoding="utf-8")
         blocker = tmp_path / "blocker"
         blocker.write_text("not a directory", encoding="utf-8")
 
@@ -344,9 +357,61 @@ class TestSampleSplitCli:
                 "--holdout-size",
                 "1",
                 "--rag-out",
-                str(blocker / "rag-pool.jsonl"),
+                str(rag_path),
                 "--holdout-out",
                 str(blocker / "holdout.jsonl"),
+                "--report",
+                str(report_path),
             ]
         ) == 1
+
         assert "error:" in capsys.readouterr().err
+        assert rag_path.read_text(encoding="utf-8") == '{"previous": "rag"}\n'
+        assert holdout_path.read_text(encoding="utf-8") == '{"previous": "holdout"}\n'
+        assert report_path.read_text(encoding="utf-8") == '{"previous": "report"}\n'
+        assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_commit_failure_rolls_back_replaced_outputs(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        found = tuple(_interaction(i) for i in range(1, 6))
+        input_path = self._write_input(tmp_path, found)
+        rag_path = tmp_path / "rag-pool.jsonl"
+        holdout_path = tmp_path / "holdout.jsonl"
+        report_path = tmp_path / "sample-report.json"
+        rag_path.write_text('{"previous": "rag"}\n', encoding="utf-8")
+        holdout_path.write_text('{"previous": "holdout"}\n', encoding="utf-8")
+        report_path.write_text('{"previous": "report"}\n', encoding="utf-8")
+
+        real_replace = cli.os.replace
+
+        def failing_replace(source, destination):
+            if Path(destination) == holdout_path:
+                raise OSError("holdout is locked")
+            return real_replace(source, destination)
+
+        monkeypatch.setattr(cli.os, "replace", failing_replace)
+
+        assert cli.main(
+            [
+                "sample-split",
+                "--in",
+                str(input_path),
+                "--sample-size",
+                "4",
+                "--holdout-size",
+                "1",
+                "--rag-out",
+                str(rag_path),
+                "--holdout-out",
+                str(holdout_path),
+                "--report",
+                str(report_path),
+            ]
+        ) == 1
+
+        assert "error:" in capsys.readouterr().err
+        assert rag_path.read_text(encoding="utf-8") == '{"previous": "rag"}\n'
+        assert holdout_path.read_text(encoding="utf-8") == '{"previous": "holdout"}\n'
+        assert report_path.read_text(encoding="utf-8") == '{"previous": "report"}\n'
+        assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []

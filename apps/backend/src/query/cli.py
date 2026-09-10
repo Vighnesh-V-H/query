@@ -252,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         if problem is not None:
             print(f"error: {problem}", file=sys.stderr)
             return 1
+        staged: list[tuple[Path, Path]] = []
         try:
             found = interactions.read_interactions_jsonl(args.input)
             rag_pool, holdout, report = sampling.sample_and_split(
@@ -260,16 +261,20 @@ def main(argv: list[str] | None = None) -> int:
                 sample_size=args.sample_size,
                 holdout_size=args.holdout_size,
             )
-            rag_path = (
-                interactions.write_interactions_jsonl(rag_pool, args.rag_out)
-                if args.rag_out
-                else None
-            )
-            holdout_path = (
-                interactions.write_interactions_jsonl(holdout, args.holdout_out)
-                if args.holdout_out
-                else None
-            )
+            if args.rag_out:
+                staged.append(
+                    (
+                        args.rag_out,
+                        interactions.stage_interactions_jsonl(rag_pool, args.rag_out),
+                    )
+                )
+            if args.holdout_out:
+                staged.append(
+                    (
+                        args.holdout_out,
+                        interactions.stage_interactions_jsonl(holdout, args.holdout_out),
+                    )
+                )
             if args.report:
                 payload = {
                     "seed": report.seed,
@@ -280,10 +285,17 @@ def main(argv: list[str] | None = None) -> int:
                     "rag_pool": report.rag_pool,
                     "holdout": report.holdout,
                 }
-                _write_json_report(args.report, payload)
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
         except (interactions.InteractionsError, sampling.SamplingError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
         lines = [
             f"input: {args.input} ({report.input_total} interactions)",
             f"seed: {report.seed}",
@@ -298,10 +310,10 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         if args.report:
             print(f"report written: {args.report}")
-        if rag_path is not None:
-            print(f"rag pool written: {rag_path}")
-        if holdout_path is not None:
-            print(f"holdout written: {holdout_path}")
+        if args.rag_out:
+            print(f"rag pool written: {args.rag_out}")
+        if args.holdout_out:
+            print(f"holdout written: {args.holdout_out}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")
@@ -329,6 +341,19 @@ def _write_json_report(path: Path, payload: dict) -> None:
     Mirrors the JSONL writer: a failed or interrupted write must not truncate
     the previous report.
     """
+    temporary_path = _stage_json_report(path, payload)
+    try:
+        os.replace(temporary_path, path)
+    except BaseException:
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            pass
+        raise
+
+
+def _stage_json_report(path: Path, payload: dict) -> Path:
+    """Write a JSON report to a temporary sibling, ready to be swapped in."""
     path.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
@@ -336,12 +361,39 @@ def _write_json_report(path: Path, payload: dict) -> None:
     try:
         with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(payload, indent=2) + "\n")
-        os.replace(temporary_name, path)
     except BaseException:
         try:
             os.unlink(temporary_name)
         except OSError:
             pass
+        raise
+    return Path(temporary_name)
+
+
+def _commit_staged_outputs(staged: list[tuple[Path, Path]]) -> None:
+    """Swap staged outputs into place, rolling back if a later swap fails.
+
+    Every output is staged before this runs, so a write failure leaves every
+    destination untouched. If a swap fails, destinations already swapped are
+    restored from the bytes captured just before their replace (or removed when
+    they did not exist); rollback is best-effort and never masks the original
+    error.
+    """
+    replaced: list[tuple[Path, bytes | None]] = []
+    try:
+        for destination, temporary in staged:
+            previous = destination.read_bytes() if destination.is_file() else None
+            os.replace(temporary, destination)
+            replaced.append((destination, previous))
+    except BaseException:
+        for destination, previous in reversed(replaced):
+            try:
+                if previous is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    destination.write_bytes(previous)
+            except OSError:
+                pass
         raise
 
 
