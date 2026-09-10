@@ -129,6 +129,7 @@ CONTINUATION_PATTERN = re.compile(
     r"i (?:have|'?ve got|got) (?:an? )?(?:issue|problem)|"
     r"the (?:issue|problem) (?:is|persists|remains)|"
     r"not (?:sure|solved|resolved)|"
+    r"but not|not (?:for|on|with) me|only works|works only|\bexcept\b|"
     r"where is|why (?:is|are|doesn'?t|did)|what about|need (?:help|this)|give me)",
     re.IGNORECASE,
 )
@@ -163,11 +164,11 @@ SOFT_INVITE_PATTERN = re.compile(
 THANKS_ANYWAY_PATTERN = re.compile(r"thanks? (?:anyway|anyways)", re.IGNORECASE)
 # The brand says it cannot help.
 REFUSAL_PATTERN = re.compile(
-    r"(unfortunately|we'?re afraid|we (?:can'?t|cannot|won'?t)|i'?m afraid|"
-    r"(?:we|we do not|we don'?t) (?:currently )?(?:have|offer|support)(?: any)?|"
+    r"(unfortunately|we'?re afraid|we (?:can'?t|cannot|won'?t)(?! (?:wait|thank|recommend))|"
+    r"i'?m afraid|"
+    r"we (?:currently )?(?:do not|don'?t) (?:currently )?(?:have|offer|support)(?: any)?|"
     r"not available|unable to|not something we|outside of our|"
-    r"not possible|we'?re not able|isn'?t (?:something|available)|"
-    r"don'?t (?:currently )?(?:have|offer|support)|we don'?t have any)",
+    r"not possible|we'?re not able|isn'?t (?:something|available))",
     re.IGNORECASE,
 )
 # The brand moves the conversation to DMs, where the outcome is invisible.

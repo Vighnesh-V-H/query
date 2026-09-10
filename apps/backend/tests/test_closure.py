@@ -169,6 +169,94 @@ class TestLabelClosures:
         assert labels[0].needs_adjudication is False
         assert labels[0].reason == closure_mod.REASON_BRAND_FOLLOWUP
 
+    def test_brand_positive_have_is_not_refusal(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "how do I change my settings?"),
+                _turn(2, "brand", "We have shared your feedback with the team."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].reason != closure_mod.REASON_BRAND_REFUSAL
+
+    def test_brand_enthusiasm_is_not_refusal(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "I can't log in"),
+                _turn(
+                    2,
+                    "brand",
+                    "We can't wait to help! Can you send us your email?",
+                ),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].reason == closure_mod.REASON_BRAND_QUESTION
+
+    def test_brand_conditional_have_is_not_refusal(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app crashes on login"),
+                _turn(
+                    2,
+                    "brand",
+                    "If you don't have the latest version, update it.",
+                ),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].reason != closure_mod.REASON_BRAND_REFUSAL
+
+    def test_contrasted_fix_claim_is_unresolved(self):
+        closings = [
+            "It works for others but not for me",
+            "It works but not for me",
+            "It only works for others",
+            "It works only for others",
+            "Everything works except notifications",
+        ]
+        found = tuple(
+            _interaction(
+                index,
+                _turn(1, "customer", "login is broken"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", closing),
+            )
+            for index, closing in enumerate(closings, start=1)
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert [label.label for label in labels] == ["unresolved"] * len(closings)
+
+    def test_bare_fix_claims_are_resolved(self):
+        closings = ["It works now", "That worked", "It's working"]
+        found = tuple(
+            _interaction(
+                index,
+                _turn(1, "customer", "login is broken"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", closing),
+            )
+            for index, closing in enumerate(closings, start=1)
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert [label.label for label in labels] == ["resolved"] * len(closings)
+
     def test_customer_fixed_but_continues_is_unresolved(self):
         found = (
             _interaction(
