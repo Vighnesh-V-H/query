@@ -345,6 +345,8 @@ class TestSampleSplitCli:
                 "1",
                 "--rag-out",
                 str(blocker / "rag-pool.jsonl"),
+                "--holdout-out",
+                str(blocker / "holdout.jsonl"),
             ]
         ) == 1
         assert "error:" in capsys.readouterr().err
