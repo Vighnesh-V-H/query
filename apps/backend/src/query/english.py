@@ -10,8 +10,8 @@ Detection uses Lingua (ADR-0004) with a conservative rule:
 
 * handles and links are stripped first — they carry no language signal;
 * the detector is restricted to English plus the languages actually present in
-  the dataset and the major world languages, which sharpens short-tweet
-  decisions;
+  the dataset and the major world languages, which sharpens decisions on short
+  messages;
 * a minimum relative distance between the two most likely languages makes the
   detector answer "no confident signal" instead of guessing. Those
   Interactions are *kept*: the filter only drops messages with positive
@@ -82,7 +82,7 @@ MENTION_PATTERN = re.compile(r"@\w+")
 
 # Relative distance between the two most likely languages below which the
 # detection counts as ambiguous. Chosen on the full dataset: tighter values
-# drop genuine English short tweets, looser ones keep obvious non-English.
+# drop genuine English short messages, looser ones keep obvious non-English.
 MINIMUM_RELATIVE_DISTANCE = 0.25
 
 
@@ -115,7 +115,7 @@ def detect_language(text: str) -> str | None:
 
     Handles and links are stripped before detection. None means the detector
     could not confidently separate the top languages (a link- or emoji-only
-    tweet, a very short message); it is the keep signal, not an error.
+    message, a very short one); it is the keep signal, not an error.
     """
     stripped = MENTION_PATTERN.sub(" ", URL_PATTERN.sub(" ", text))
     language = _detector().detect_language_of(stripped)

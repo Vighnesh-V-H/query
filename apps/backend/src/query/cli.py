@@ -132,8 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                     "turns_customer": report.turns_customer,
                     "turns_brand": report.turns_brand,
                 }
-                args.report.parent.mkdir(parents=True, exist_ok=True)
-                args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                _write_json_report(args.report, payload)
         except (interactions.InteractionsError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -172,8 +171,7 @@ def main(argv: list[str] | None = None) -> int:
                     "no_signal": report.no_signal,
                     "filtered_by_language": dict(report.filtered_by_language),
                 }
-                args.report.parent.mkdir(parents=True, exist_ok=True)
-                args.report.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+                _write_json_report(args.report, payload)
         except (interactions.InteractionsError, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
@@ -198,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")
+
+
+def _write_json_report(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

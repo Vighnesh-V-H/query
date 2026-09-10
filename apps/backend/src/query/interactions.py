@@ -292,9 +292,9 @@ def read_interactions_jsonl(
 ) -> tuple[Interaction, ...]:
     """Read Interactions back from the JSON Lines format written above.
 
-    Inverse of :func:`write_interactions_jsonl`: parses and validates every
-    record so downstream stages never see a malformed Interaction. Returns the
-    Interactions in file order.
+    Inverse of :func:`write_interactions_jsonl`: parses every record and
+    validates its JSON Lines structure so downstream stages never see a
+    structurally malformed Interaction. Returns the Interactions in file order.
     """
     input_path = Path(input_path)
     if not input_path.is_file():
@@ -304,12 +304,12 @@ def read_interactions_jsonl(
         for line_number, line in enumerate(handle, start=1):
             if not line.strip():
                 continue
-            interactions.append(_parse_interaction_line(line, input_path, line_number))
+            location = f"line {line_number} of {input_path}"
+            interactions.append(_parse_interaction_line(line, location))
     return tuple(interactions)
 
 
-def _parse_interaction_line(line: str, input_path: Path, line_number: int) -> Interaction:
-    location = f"line {line_number} of {input_path}"
+def _parse_interaction_line(line: str, location: str) -> Interaction:
     try:
         record = json.loads(line)
     except json.JSONDecodeError as exc:
@@ -327,7 +327,7 @@ def _parse_interaction_line(line: str, input_path: Path, line_number: int) -> In
     if not isinstance(turns_raw, list) or not turns_raw:
         raise InteractionsError(f"malformed Interaction on {location}: turns must be non-empty")
     turns = tuple(
-        _parse_turn_line(turn, input_path, line_number, index)
+        _parse_turn_line(turn, location, index)
         for index, turn in enumerate(turns_raw)
     )
     if turns[0].side != "customer":
@@ -342,8 +342,8 @@ def _parse_interaction_line(line: str, input_path: Path, line_number: int) -> In
     )
 
 
-def _parse_turn_line(turn: object, input_path: Path, line_number: int, index: int) -> Turn:
-    location = f"line {line_number} of {input_path}, turn {index}"
+def _parse_turn_line(turn: object, location: str, index: int) -> Turn:
+    location = f"{location}, turn {index}"
     if not isinstance(turn, dict):
         raise InteractionsError(f"malformed Turn on {location}: expected an object")
     tweet_id = turn.get("tweet_id")
