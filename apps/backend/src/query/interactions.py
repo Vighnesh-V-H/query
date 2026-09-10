@@ -41,6 +41,7 @@ from typing import Literal
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_TWCS_PATH = REPO_ROOT / "data" / "raw" / "twcs" / "twcs.csv"
+DEFAULT_INTERACTIONS_PATH = REPO_ROOT / "data" / "interactions.jsonl"
 DEFAULT_BRAND = "SpotifyCares"
 COLUMNS = (
     "tweet_id",
@@ -284,6 +285,91 @@ def write_interactions_jsonl(
             pass
         raise
     return output_path
+
+
+def read_interactions_jsonl(
+    input_path: Path | str = DEFAULT_INTERACTIONS_PATH,
+) -> tuple[Interaction, ...]:
+    """Read Interactions back from the JSON Lines format written above.
+
+    Inverse of :func:`write_interactions_jsonl`: parses and validates every
+    record so downstream stages never see a malformed Interaction. Returns the
+    Interactions in file order.
+    """
+    input_path = Path(input_path)
+    if not input_path.is_file():
+        raise InteractionsError(f"interactions JSONL does not exist: {input_path}")
+    interactions = []
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            interactions.append(_parse_interaction_line(line, input_path, line_number))
+    return tuple(interactions)
+
+
+def _parse_interaction_line(line: str, input_path: Path, line_number: int) -> Interaction:
+    location = f"line {line_number} of {input_path}"
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise InteractionsError(f"malformed JSON on {location}: {exc}") from exc
+    if not isinstance(record, dict):
+        raise InteractionsError(f"malformed Interaction on {location}: expected an object")
+    interaction_id = record.get("interaction_id")
+    customer_id = record.get("customer_id")
+    brand_id = record.get("brand_id")
+    turns_raw = record.get("turns")
+    if type(interaction_id) is not int:
+        raise InteractionsError(f"malformed Interaction on {location}: invalid interaction_id")
+    if not isinstance(customer_id, str) or not isinstance(brand_id, str):
+        raise InteractionsError(f"malformed Interaction on {location}: invalid author ids")
+    if not isinstance(turns_raw, list) or not turns_raw:
+        raise InteractionsError(f"malformed Interaction on {location}: turns must be non-empty")
+    turns = tuple(
+        _parse_turn_line(turn, input_path, line_number, index)
+        for index, turn in enumerate(turns_raw)
+    )
+    if turns[0].side != "customer":
+        raise InteractionsError(
+            f"malformed Interaction on {location}: first turn must be a customer message"
+        )
+    return Interaction(
+        interaction_id=interaction_id,
+        customer_id=customer_id,
+        brand_id=brand_id,
+        turns=turns,
+    )
+
+
+def _parse_turn_line(turn: object, input_path: Path, line_number: int, index: int) -> Turn:
+    location = f"line {line_number} of {input_path}, turn {index}"
+    if not isinstance(turn, dict):
+        raise InteractionsError(f"malformed Turn on {location}: expected an object")
+    tweet_id = turn.get("tweet_id")
+    author_id = turn.get("author_id")
+    side = turn.get("side")
+    created_at = turn.get("created_at")
+    text = turn.get("text")
+    if type(tweet_id) is not int:
+        raise InteractionsError(f"malformed Turn on {location}: invalid tweet_id")
+    if not isinstance(author_id, str) or side not in ("customer", "brand"):
+        raise InteractionsError(f"malformed Turn on {location}: invalid author_id or side")
+    if not isinstance(text, str):
+        raise InteractionsError(f"malformed Turn on {location}: invalid text")
+    if not isinstance(created_at, str):
+        raise InteractionsError(f"malformed Turn on {location}: invalid created_at")
+    try:
+        timestamp = datetime.fromisoformat(created_at)
+    except ValueError as exc:
+        raise InteractionsError(f"malformed Turn on {location}: invalid created_at") from exc
+    return Turn(
+        tweet_id=tweet_id,
+        author_id=author_id,
+        side=side,
+        created_at=timestamp,
+        text=text,
+    )
 
 
 def _parse_row(record: list[str], csv_path: Path) -> _Row:

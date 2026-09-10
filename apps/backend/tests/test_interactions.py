@@ -1,4 +1,5 @@
 import csv
+import json
 
 import pytest
 
@@ -386,7 +387,6 @@ class TestWriteInteractionsJsonl:
 
         out_path = interactions_mod.write_interactions_jsonl(found, tmp_path / "sub" / "interactions.jsonl")
 
-        import json
         lines = out_path.read_text(encoding="utf-8").splitlines()
         assert len(lines) == 1
         record = json.loads(lines[0])
@@ -438,7 +438,6 @@ class TestCli:
             ["build-interactions", "--twcs", str(csv_path), "--report", str(report_path)]
         ) == 0
 
-        import json
         payload = json.loads(report_path.read_text(encoding="utf-8"))
         assert payload["interactions"] == 1
         assert payload["turns_total"] == 2
@@ -455,7 +454,6 @@ class TestCli:
             ["build-interactions", "--twcs", str(csv_path), "--out", str(out_path)]
         ) == 0
 
-        import json
         out = capsys.readouterr().out
         assert "interactions written: " in out
         lines = out_path.read_text(encoding="utf-8").splitlines()
@@ -505,3 +503,100 @@ class TestCli:
     def test_build_interactions_command_errors_on_missing_csv(self, tmp_path, capsys):
         assert cli.main(["build-interactions", "--twcs", str(tmp_path / "nope.csv")]) == 1
         assert "error:" in capsys.readouterr().err
+
+
+def _turn_record(tweet_id=1, side="customer", created_at="2017-11-01T10:00:00+00:00"):
+    return {
+        "tweet_id": tweet_id,
+        "author_id": "cust",
+        "side": side,
+        "created_at": created_at,
+        "text": "hello",
+    }
+
+
+def _interaction_record(interaction_id=1, turns=None):
+    return {
+        "interaction_id": interaction_id,
+        "customer_id": "cust",
+        "brand_id": BRAND,
+        "turns": [_turn_record()] if turns is None else turns,
+    }
+
+
+def _write_jsonl(path, records):
+    path.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+
+
+class TestReadInteractionsJsonl:
+    def test_round_trip_preserves_interactions(self, tmp_path):
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares my app crashes"', ""),
+            _row(2, BRAND, "False", _dt(11), '"@cust try a reinstall"', 1),
+        ])
+        found, _ = interactions_mod.build_interactions(csv_path, BRAND)
+        out_path = interactions_mod.write_interactions_jsonl(
+            found, tmp_path / "interactions.jsonl"
+        )
+
+        assert interactions_mod.read_interactions_jsonl(out_path) == found
+
+    def test_missing_file_rejected(self, tmp_path):
+        with pytest.raises(interactions_mod.InteractionsError, match="does not exist"):
+            interactions_mod.read_interactions_jsonl(tmp_path / "missing.jsonl")
+
+    def test_malformed_json_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        path.write_text("{not json\n", encoding="utf-8")
+
+        with pytest.raises(interactions_mod.InteractionsError, match="malformed JSON"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_non_object_record_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(path, [[1, 2, 3]])
+
+        with pytest.raises(interactions_mod.InteractionsError, match="expected an object"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_empty_turns_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(path, [_interaction_record(turns=[])])
+
+        with pytest.raises(interactions_mod.InteractionsError, match="turns must be non-empty"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_invalid_side_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(path, [_interaction_record(turns=[_turn_record(side="other")])])
+
+        with pytest.raises(interactions_mod.InteractionsError, match="author_id or side"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_first_turn_must_be_customer(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(path, [_interaction_record(turns=[_turn_record(side="brand")])])
+
+        with pytest.raises(interactions_mod.InteractionsError, match="first turn"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_invalid_created_at_rejected(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        _write_jsonl(
+            path, [_interaction_record(turns=[_turn_record(created_at="not a timestamp")])]
+        )
+
+        with pytest.raises(interactions_mod.InteractionsError, match="invalid created_at"):
+            interactions_mod.read_interactions_jsonl(path)
+
+    def test_blank_lines_are_skipped(self, tmp_path):
+        path = tmp_path / "interactions.jsonl"
+        path.write_text(json.dumps(_interaction_record()) + "\n\n", encoding="utf-8")
+
+        found = interactions_mod.read_interactions_jsonl(path)
+
+        assert len(found) == 1
+        assert found[0].interaction_id == 1
