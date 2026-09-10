@@ -33,7 +33,9 @@ class _FakeClient:
         self.chat = _FakeChat(self.completions)
 
 
-def test_call_llm_uses_configured_role_model():
+def test_call_llm_uses_configured_role_model(monkeypatch):
+    for role in llm.config.ROLES:
+        monkeypatch.delenv(f"QUERY_{role.upper()}_MODEL", raising=False)
     fake = _FakeClient(content="ok")
     cfg = {
         "generator": "test/gen",

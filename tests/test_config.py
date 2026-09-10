@@ -15,14 +15,17 @@ def models_config():
     }
 
 
-def test_load_models_config_defines_all_roles():
+def test_load_models_config_defines_all_roles(monkeypatch):
+    monkeypatch.delenv("QUERY_CONFIG_PATH", raising=False)
     cfg = config.load_models_config()
     for role in config.ROLES:
         assert cfg[role]
     assert cfg["provider"]["base_url"].startswith("https://")
 
 
-def test_model_for_role(models_config):
+def test_model_for_role(models_config, monkeypatch):
+    for role in config.ROLES:
+        monkeypatch.delenv(f"QUERY_{role.upper()}_MODEL", raising=False)
     assert config.model_for("generator", models_config) == "test/gen-model"
     assert config.model_for("judge", models_config) == "test/judge-model"
 
