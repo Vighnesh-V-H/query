@@ -27,7 +27,9 @@ signals do not leak into a label:
    happened privately is not visible in the recorded Interaction;
 7. a brand reply that says it cannot help is Unresolved;
 8. a customer acknowledgement followed by a closing courtesy ("you're welcome")
-   or a plain sign-off is Resolved;
+   or a plain sign-off is Resolved — unless the brand asks for something ("can
+   you send us...") or promises to investigate further, in which case the
+   issue is still open;
 9. a brand reply that asks for more information, or promises to investigate
    further, with no customer response is Uncertain;
 10. any other brand-last ending is Uncertain: the brand replied and the customer
@@ -38,8 +40,8 @@ thank-you only counts as acknowledgement when it is essentially the whole
 message — a long message that merely contains a thank-you is usually a new
 request with a courtesy attached — and the opening customer message can never
 acknowledge help it has not received. A closing courtesy on its own ("you're
-welcome", "glad to hear") is not a completion claim; it is only closure
-evidence next to a customer acknowledgement.
+welcome", "glad to hear") is not a completion claim, and a negated fix ("it's
+not fixed yet") is a continuation, not an acknowledgement.
 
 Every verdict carries a human-readable reason; flagged cases carry the reason
 they need adjudication. The report counts each label, the flagged volume by
@@ -99,6 +101,13 @@ FIXED_PATTERN = re.compile(
     r"it'?s working|it works|back to normal|all good now|no issues? now)",
     re.IGNORECASE,
 )
+# A negation before "fixed"/"solved" means the opposite: the issue is open.
+NEGATED_FIX_PATTERN = re.compile(
+    r"\b(?:not|never|isn'?t|wasn'?t|weren'?t|hasn'?t|hadn'?t|ain'?t)\b"
+    r"(?: been| yet| even| fully| properly| completely| really| quite)*"
+    r" (?:fixed|solved|resolved)",
+    re.IGNORECASE,
+)
 # The customer thanks or approves: only unambiguous acknowledgements, so a
 # short "sure" or "ok" is left for adjudication rather than guessed.
 ACK_PATTERN = re.compile(
@@ -118,7 +127,7 @@ CONTINUATION_PATTERN = re.compile(
     r"still (?:can'?t|cannot|not|waiting|broken|the same|an issue|having)|"
     r"i (?:have|'?ve got|got) (?:an? )?(?:issue|problem)|"
     r"the (?:issue|problem) (?:is|persists|remains)|"
-    r"not (?:sure|solved|resolved|fixed)|isn'?t fixed|"
+    r"not (?:sure|solved|resolved)|"
     r"where is|why (?:is|are|doesn'?t|did)|what about|need (?:help|this)|give me)",
     re.IGNORECASE,
 )
@@ -140,14 +149,14 @@ COMPLETION_PATTERN = re.compile(
     r"you'?re all set|back to normal|back (?:up and running|on track)|it'?s fixed)",
     re.IGNORECASE,
 )
-# The brand wraps up politely. Only closure evidence when the customer already
-# acknowledged; on its own it says nothing about whether the issue was solved.
-COURTESY_PATTERN = re.compile(
-    r"(you'?re welcome|no worries|glad (?:to hear|it'?s|that|everything)|"
-    r"happy to hear|enjoy your|thanks for your patience)",
+# A closing invitation ("let us know if you need us") matches the question
+# pattern but asks nothing of the customer; it is a sign-off, not a request.
+SOFT_INVITE_PATTERN = re.compile(
+    r"(if you (?:ever )?(?:need|have)|anything else|give us a shout|"
+    r"you know where to find us|we'?re (?:here|around)|just let us know|shout if|"
+    r"reach out (?:if|anytime)|don'?t hesitate)",
     re.IGNORECASE,
-)
-# "Thanks anyway" is resignation, not an acknowledgement of resolution.
+)# "Thanks anyway" is resignation, not an acknowledgement of resolution.
 THANKS_ANYWAY_PATTERN = re.compile(r"thanks? (?:anyway|anyways)", re.IGNORECASE)
 # The brand says it cannot help.
 REFUSAL_PATTERN = re.compile(
@@ -302,6 +311,8 @@ def _acknowledges_resolution(text: str) -> bool:
     thank-you is usually a new request with a courtesy attached.
     """
     text = _normalize(text)
+    if NEGATED_FIX_PATTERN.search(text):
+        return False
     if FIXED_PATTERN.search(text):
         return True
     if THANKS_ANYWAY_PATTERN.search(text):
@@ -310,6 +321,11 @@ def _acknowledges_resolution(text: str) -> bool:
         return False
     stripped = MENTION_PATTERN.sub(" ", URL_PATTERN.sub(" ", text)).strip()
     return len(stripped) <= MAX_ACKNOWLEDGEMENT_LENGTH
+
+
+def _continues_issue(text: str) -> bool:
+    """True when the message keeps the issue open rather than closing it."""
+    return bool(CONTINUATION_PATTERN.search(text) or NEGATED_FIX_PATTERN.search(text))
 
 
 def _label_interaction(interaction: Interaction) -> ClosureLabel:
@@ -323,7 +339,7 @@ def _label_customer_closing(interaction_id: int, turns: tuple[Turn, ...]) -> Clo
     text = _normalize(turns[-1].text)
     if DM_REPLY_PATTERN.search(text):
         return _flagged(interaction_id, REASON_CUSTOMER_DM)
-    if CONTINUATION_PATTERN.search(text):
+    if _continues_issue(text):
         return _labeled(interaction_id, "unresolved", REASON_CUSTOMER_CONTINUES)
     if not _acknowledges_resolution(text):
         return _flagged(interaction_id, REASON_CUSTOMER_UNCLEAR)
@@ -352,17 +368,20 @@ def _label_brand_closing(interaction_id: int, turns: tuple[Turn, ...]) -> Closur
     customer_acked = (
         last_customer is not None
         and last_customer is not turns[0]
-        and not CONTINUATION_PATTERN.search(_normalize(last_customer.text))
+        and not _continues_issue(_normalize(last_customer.text))
         and _acknowledges_resolution(last_customer.text)
     )
-    if customer_acked and (
-        COURTESY_PATTERN.search(text)
-        or not (FOLLOWUP_PATTERN.search(text) or QUESTION_PATTERN.search(text))
+    followup = FOLLOWUP_PATTERN.search(text)
+    question = QUESTION_PATTERN.search(text)
+    # A closing invitation is a sign-off, not a request for information; a
+    # promise to investigate is work still in flight, so it never closes.
+    if customer_acked and not followup and (
+        not question or SOFT_INVITE_PATTERN.search(text)
     ):
         return _labeled(interaction_id, "resolved", REASON_BRAND_ACK_CLOSE)
-    if FOLLOWUP_PATTERN.search(text):
+    if followup:
         return _labeled(interaction_id, "uncertain", REASON_BRAND_FOLLOWUP)
-    if QUESTION_PATTERN.search(text):
+    if question:
         return _labeled(interaction_id, "uncertain", REASON_BRAND_QUESTION)
     return _labeled(interaction_id, "uncertain", REASON_BRAND_SILENCE)
 

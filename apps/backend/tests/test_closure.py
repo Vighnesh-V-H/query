@@ -330,6 +330,83 @@ class TestLabelClosures:
 
         assert labels[0].label == "unresolved"
 
+    def test_negated_fix_is_unresolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "My issue hasn't been fixed yet"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "unresolved"
+
+    def test_soft_invitation_after_acknowledgement_is_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "Thanks, that worked!"),
+                _turn(4, "brand", "You're welcome! Let us know if you ever need us again."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "resolved"
+        assert labels[0].reason == closure_mod.REASON_BRAND_ACK_CLOSE
+
+    def test_request_after_acknowledgement_is_not_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "Thanks!"),
+                _turn(4, "brand", "You're welcome! Can you send us a screenshot?"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].reason == closure_mod.REASON_BRAND_QUESTION
+
+    def test_followup_with_courtesy_after_acknowledgement_is_uncertain(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "Thanks!"),
+                _turn(4, "brand", "Thanks for your patience, we'll pass this to the team."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+        assert labels[0].reason == closure_mod.REASON_BRAND_FOLLOWUP
+
+    def test_thanks_anyway_before_closing_is_not_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "can you restore my playlist?"),
+                _turn(2, "brand", "We're afraid we can't restore deleted playlists."),
+                _turn(3, "customer", "Dang, thanks anyway :("),
+                _turn(4, "brand", "No worries! We're here if you need us."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+
     def test_thanks_anyway_is_not_guessed(self):
         found = (
             _interaction(
