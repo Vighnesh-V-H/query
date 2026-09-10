@@ -16,7 +16,7 @@ Non-obvious decisions made while building Query v0, and why. (Assignment deliver
 
 7. **Headline metric: false-auto rate.** "X% of auto-handled messages shouldn't have been" is the number that proves trustworthiness, which is what the assignment actually tests. Intent Macro-F1, reply judge score, and auto-handling rate are supporting numbers.
 
-8. **NVIDIA NIM models, all roles swappable via config.** DeepSeek-V4-Pro (generator), Nemotron-3-Super-120B (judge — deliberately a different family than the generator to avoid self-preference bias), Nemotron-3.5-Lightning (closure labeler / classifier), chosen at the user's request from the NVIDIA API catalog. Exact model ids and the OpenAI-compatible base URL live in `configs/models.yaml`; override a role with `QUERY_<ROLE>_MODEL` and authenticate with `NVIDIA_API_KEY` or `OPENROUTER_API_KEY` (first set wins).
+8. **NVIDIA NIM models, all roles swappable via config.** DeepSeek-V4-Pro (generator), Nemotron-3-Super-120B (judge — deliberately a different family than the generator to avoid self-preference bias), Nemotron-3.5-Lightning (closure labeler / classifier), chosen at the user's request from the NVIDIA API catalog. Cost: development is within NVIDIA's free trial credits; per-token pricing applies only if credits are exhausted; all three roles were verified as invocable against this account's catalog (see `configs/models.yaml`, which owns the exact model ids and OpenAI-compatible base URL). Override a role with `QUERY_<ROLE>_MODEL` and authenticate with `NVIDIA_API_KEY` or `OPENROUTER_API_KEY` (first set wins).
 
 9. **Local embeddings (all-MiniLM-L6-v2) for clustering and retrieval.** Free, offline, deterministic — safer for the 15-minute reproducibility story than API embeddings.
 
