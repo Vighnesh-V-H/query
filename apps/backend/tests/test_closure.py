@@ -255,6 +255,96 @@ class TestLabelClosures:
 
         assert labels[0].label == "uncertain"
 
+    def test_channel_refusal_with_dm_request_is_flagged(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "can I call you?"),
+                _turn(
+                    2,
+                    "brand",
+                    "We don't offer telephone support, but can you DM us your account's email?",
+                ),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label is None
+        assert labels[0].needs_adjudication is True
+
+    def test_courtesy_without_acknowledgement_is_uncertain(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "how do I change my username?"),
+                _turn(2, "brand", "Enjoy your music!"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "uncertain"
+
+    def test_courtesy_after_acknowledgement_is_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "that fixed it, thank you!"),
+                _turn(4, "brand", "No worries! You're welcome."),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "resolved"
+        assert labels[0].reason == closure_mod.REASON_BRAND_ACK_CLOSE
+
+    def test_again_in_acknowledgement_is_resolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app works now"),
+                _turn(2, "brand", "Great to hear!"),
+                _turn(3, "customer", "Thank you again for helping me!"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "resolved"
+
+    def test_not_fixed_is_unresolved(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "the app keeps crashing"),
+                _turn(2, "brand", "Try reinstalling."),
+                _turn(3, "customer", "Still not fixed, sorry"),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label == "unresolved"
+
+    def test_thanks_anyway_is_not_guessed(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "can you restore my playlist?"),
+                _turn(2, "brand", "We can't restore deleted playlists."),
+                _turn(3, "customer", "Dang, thanks anyway :("),
+            ),
+        )
+
+        labels, _ = closure_mod.label_closures(found)
+
+        assert labels[0].label is None
+        assert labels[0].needs_adjudication is True
+
     def test_opening_message_cannot_acknowledge_help(self):
         # The opening asks for a feature; "awesome" is not a thank-you.
         found = (

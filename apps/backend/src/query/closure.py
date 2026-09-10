@@ -23,18 +23,23 @@ signals do not leak into a label:
    flagged;
 5. a brand reply that claims the issue was fixed or processed is Resolved, even
    when it points at a DM for the details;
-6. a brand reply that says it cannot help is Unresolved;
-7. a brand reply that asks the customer back into DMs is flagged — whatever
+6. a brand reply that asks the customer back into DMs is flagged — whatever
    happened privately is not visible in the recorded Interaction;
-8. a brand reply that asks for more information, or promises to investigate
+7. a brand reply that says it cannot help is Unresolved;
+8. a customer acknowledgement followed by a closing courtesy ("you're welcome")
+   or a plain sign-off is Resolved;
+9. a brand reply that asks for more information, or promises to investigate
    further, with no customer response is Uncertain;
-9. a customer acknowledgement followed by a brand closing courtesy is Resolved;
 10. any other brand-last ending is Uncertain: the brand replied and the customer
     went silent, which is the Uncertain definition, not a guess.
 
-A bare "thanks" only counts as acknowledgement when it is essentially the whole
-message: a long message that merely contains a thank-you is usually a new
-request with a courtesy attached, so it is not treated as evidence of closure.
+Two refinements keep false Resolved labels out of the RAG index. A bare
+thank-you only counts as acknowledgement when it is essentially the whole
+message — a long message that merely contains a thank-you is usually a new
+request with a courtesy attached — and the opening customer message can never
+acknowledge help it has not received. A closing courtesy on its own ("you're
+welcome", "glad to hear") is not a completion claim; it is only closure
+evidence next to a customer acknowledgement.
 
 Every verdict carries a human-readable reason; flagged cases carry the reason
 they need adjudication. The report counts each label, the flagged volume by
@@ -97,7 +102,7 @@ FIXED_PATTERN = re.compile(
 # The customer thanks or approves: only unambiguous acknowledgements, so a
 # short "sure" or "ok" is left for adjudication rather than guessed.
 ACK_PATTERN = re.compile(
-    r"(\bthanks?\b|\bthank you\b|\bthx\b|\bcheers\b|\bappreciate (?:it|your|the)\b|"
+    r"(\bthanks?\b|\bthank you\b|\bthx\b|\bty\b|\bcheers\b|\bappreciate (?:it|your|the)\b|"
     r"\bgot it\b|\bgotcha\b|\bperfect\b|\bawesome\b|\blovely\b|\bthat'?s great\b|"
     r"\ball good\b|\bsorted\b|\bbutiful\b|worked, thank)",
     re.IGNORECASE,
@@ -111,9 +116,9 @@ CONTINUATION_PATTERN = re.compile(
     r"can'?t (?:log|sign|access|play|use|find|see|get)|"
     r"cannot (?:log|sign|access|play|use|find|see|get)|"
     r"still (?:can'?t|cannot|not|waiting|broken|the same|an issue|having)|"
-    r"\bagain\b|i (?:have|'?ve got|got) (?:an? )?(?:issue|problem)|"
+    r"i (?:have|'?ve got|got) (?:an? )?(?:issue|problem)|"
     r"the (?:issue|problem) (?:is|persists|remains)|"
-    r"not (?:sure|solved|resolved)|"
+    r"not (?:sure|solved|resolved|fixed)|isn'?t fixed|"
     r"where is|why (?:is|are|doesn'?t|did)|what about|need (?:help|this)|give me)",
     re.IGNORECASE,
 )
@@ -125,16 +130,25 @@ DM_REPLY_PATTERN = re.compile(
     r"messaged you\b|dm sent\b)",
     re.IGNORECASE,
 )
-# The brand claims the issue/action was completed.
+# The brand claims the issue/action was completed. Closing courtesies ("you're
+# welcome") are not completion claims and live in COURTESY_PATTERN instead.
 COMPLETION_PATTERN = re.compile(
-    r"(you'?re welcome|we'?ve (?:fixed|resolved|processed|updated|sorted|taken care)|"
+    r"(we'?ve (?:fixed|resolved|processed|updated|sorted|taken care)|"
     r"has been (?:fixed|resolved|processed|updated)|"
     r"is now (?:fixed|resolved|working|available)|"
     r"should (?:now )?(?:be )?(?:working|work|be fixed|be resolved)|"
-    r"you'?re all set|back to normal|glad (?:to hear|it'?s|that|everything)|"
-    r"happy to hear|thanks for your patience|enjoy your|it'?s fixed)",
+    r"you'?re all set|back to normal|back (?:up and running|on track)|it'?s fixed)",
     re.IGNORECASE,
 )
+# The brand wraps up politely. Only closure evidence when the customer already
+# acknowledged; on its own it says nothing about whether the issue was solved.
+COURTESY_PATTERN = re.compile(
+    r"(you'?re welcome|no worries|glad (?:to hear|it'?s|that|everything)|"
+    r"happy to hear|enjoy your|thanks for your patience)",
+    re.IGNORECASE,
+)
+# "Thanks anyway" is resignation, not an acknowledgement of resolution.
+THANKS_ANYWAY_PATTERN = re.compile(r"thanks? (?:anyway|anyways)", re.IGNORECASE)
 # The brand says it cannot help.
 REFUSAL_PATTERN = re.compile(
     r"(unfortunately|we'?re afraid|we (?:can'?t|cannot|won'?t)|i'?m afraid|"
@@ -290,6 +304,8 @@ def _acknowledges_resolution(text: str) -> bool:
     text = _normalize(text)
     if FIXED_PATTERN.search(text):
         return True
+    if THANKS_ANYWAY_PATTERN.search(text):
+        return False
     if not ACK_PATTERN.search(text):
         return False
     stripped = MENTION_PATTERN.sub(" ", URL_PATTERN.sub(" ", text)).strip()
@@ -327,23 +343,27 @@ def _label_brand_closing(interaction_id: int, turns: tuple[Turn, ...]) -> Closur
     text = _normalize(turns[-1].text)
     if COMPLETION_PATTERN.search(text):
         return _labeled(interaction_id, "resolved", REASON_BRAND_COMPLETION)
-    if REFUSAL_PATTERN.search(text):
-        return _labeled(interaction_id, "unresolved", REASON_BRAND_REFUSAL)
     if DEFLECTION_PATTERN.search(text):
         return _flagged(interaction_id, REASON_BRAND_DM)
-    if FOLLOWUP_PATTERN.search(text):
-        return _labeled(interaction_id, "uncertain", REASON_BRAND_FOLLOWUP)
-    if QUESTION_PATTERN.search(text):
-        return _labeled(interaction_id, "uncertain", REASON_BRAND_QUESTION)
+    if REFUSAL_PATTERN.search(text):
+        return _labeled(interaction_id, "unresolved", REASON_BRAND_REFUSAL)
     last_customer = next((turn for turn in reversed(turns) if turn.side == "customer"), None)
     # The opening message cannot acknowledge help it has not received yet.
-    if (
+    customer_acked = (
         last_customer is not None
         and last_customer is not turns[0]
         and not CONTINUATION_PATTERN.search(_normalize(last_customer.text))
         and _acknowledges_resolution(last_customer.text)
+    )
+    if customer_acked and (
+        COURTESY_PATTERN.search(text)
+        or not (FOLLOWUP_PATTERN.search(text) or QUESTION_PATTERN.search(text))
     ):
         return _labeled(interaction_id, "resolved", REASON_BRAND_ACK_CLOSE)
+    if FOLLOWUP_PATTERN.search(text):
+        return _labeled(interaction_id, "uncertain", REASON_BRAND_FOLLOWUP)
+    if QUESTION_PATTERN.search(text):
+        return _labeled(interaction_id, "uncertain", REASON_BRAND_QUESTION)
     return _labeled(interaction_id, "uncertain", REASON_BRAND_SILENCE)
 
 
