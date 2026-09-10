@@ -224,6 +224,91 @@ class TestBuildInteractions:
         assert report.interactions == 1
         assert found[0].interaction_id == 1
 
+    def test_longer_handle_is_not_a_seed(self, tmp_path):
+        # a bare mention of the longer handle with no brand adjacency: no seed
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCaresHelp you there?"', ""),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.seed_count == 0
+        assert report.interactions == 0
+        assert found == ()
+
+    def test_mention_at_end_of_text_still_seeds_via_boundary(self, tmp_path):
+        # exact handle followed by punctuation stays a seed
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares: app crashes!"', ""),
+        ])
+
+        _, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.seed_count == 1
+
+    def test_self_parenting_row_does_not_loop_forever(self, tmp_path):
+        # parent id equals the tweet id itself: climb must stop, not spin
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares help"', 1),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.unanswered_openings == 1
+        assert found == ()
+
+    def test_climb_passes_through_two_consecutive_brand_turns(self, tmp_path):
+        # brand self-reply before answering the customer: the whole chain is
+        # one Interaction rooted at the customer opening
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares help"', ""),
+            _row(2, BRAND, "False", _dt(11), '"internal note"', 1),
+            _row(3, BRAND, "False", _dt(12), '"@cust which device?"', 2),
+            _row(4, "cust", "True", _dt(13), '"android"', 3),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.interactions == 1
+        assert found[0].interaction_id == 1
+        assert [t.tweet_id for t in found[0].turns] == [1, 2, 3, 4]
+        assert [t.side for t in found[0].turns] == ["customer", "brand", "brand", "customer"]
+
+    def test_two_seeds_same_opening_deduplicated(self, tmp_path):
+        # two seeds climb to the same opening: one Interaction, not two
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares help"', ""),
+            _row(2, "cust", "True", _dt(11), '"@SpotifyCares more info"', 1),
+            _row(3, BRAND, "False", _dt(12), '"@cust on it"', 2),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.interactions == 1
+        assert found[0].interaction_id == 1
+        assert [t.tweet_id for t in found[0].turns] == [1, 2, 3]
+
+    def test_brand_self_reply_chain_in_dyad(self, tmp_path):
+        # downward brand->brand self-replies after the customer turn are part
+        # of the same Interaction
+        csv_path = tmp_path / "twcs.csv"
+        _write_csv(csv_path, [
+            _row(1, "cust", "True", _dt(10), '"@SpotifyCares help"', ""),
+            _row(2, BRAND, "False", _dt(11), '"@cust we are checking"', 1),
+            _row(3, BRAND, "False", _dt(12), '"@cust still checking"', 2),
+        ])
+
+        found, report = interactions_mod.build_interactions(csv_path, BRAND)
+
+        assert report.interactions == 1
+        assert [t.tweet_id for t in found[0].turns] == [1, 2, 3]
+        assert found[0].brand_turns == 2
+
 
 class TestWriteInteractionsJsonl:
     def test_writes_ordered_turns_one_per_line(self, tmp_path):

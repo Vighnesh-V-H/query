@@ -309,15 +309,16 @@ def _find_seeds(
 
     A seed engages the Brand when its text mentions the Brand handle, when the
     Brand replied to it, or when it replies to a Brand tweet. Mention matching
-    is prefix-based (``@brand`` at the start of the tweet, ignoring case) so a
-    handle like ``@SpotifyCaresHelp`` is not matched by ``@SpotifyCares``.
+    requires a whole handle (``@brand`` at the start of the text, ending at a
+    handle boundary) so a handle like ``@SpotifyCaresHelp`` is not matched by
+    ``@SpotifyCares``.
     """
     mention = "@" + brand_id.lower()
     seeds: set[int] = set()
     for tweet in rows.values():
         if not tweet.inbound or tweet.author_id == brand_id:
             continue
-        if tweet.text.lower().startswith(mention):
+        if _mentions_brand(tweet.text, mention):
             seeds.add(tweet.tweet_id)
         elif tweet.tweet_id in brand_replied_to:
             seeds.add(tweet.tweet_id)
@@ -326,6 +327,19 @@ def _find_seeds(
             if parent is not None and parent.author_id == brand_id:
                 seeds.add(tweet.tweet_id)
     return seeds
+
+
+def _mentions_brand(text: str, mention: str) -> bool:
+    """True when the tweet text mentions the Brand handle as a whole handle.
+
+    The mention must start the text and end at a handle boundary, so
+    ``@SpotifyCaresHelp`` is NOT matched by ``@SpotifyCares``.
+    """
+    lowered = text.lower()
+    if not lowered.startswith(mention):
+        return False
+    rest = lowered[len(mention):]
+    return not rest or not (rest[0].isalnum() or rest[0] == "_")
 
 
 def _climb_to_opening(
@@ -345,9 +359,10 @@ def _climb_to_opening(
     author = rows[seed].author_id
     current = seed
     opening = seed
+    visited: set[int] = {seed}
     while True:
         parent_id = rows[current].parent_id
-        if parent_id is None:
+        if parent_id is None or parent_id == current or parent_id in visited:
             return opening
         parent = rows.get(parent_id)
         if parent is None:
@@ -375,7 +390,7 @@ def _is_seed(
     if not tweet.inbound or tweet.author_id == brand_id:
         return False
     mention = "@" + brand_id.lower()
-    if tweet.text.lower().startswith(mention):
+    if _mentions_brand(tweet.text, mention):
         return True
     if tweet.tweet_id in brand_replied_to:
         return True
