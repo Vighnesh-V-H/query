@@ -5,7 +5,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from query import config, english, interactions, llm, sampling, source
+from query import closure, config, english, interactions, llm, sampling, source
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,6 +130,30 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write the sample report as JSON",
+    )
+
+    label_closure_parser = sub.add_parser(
+        "label-closure",
+        help="label obvious Resolved/Uncertain/Unresolved closures with keyword heuristics",
+    )
+    label_closure_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=closure.DEFAULT_INPUT_PATH,
+        help=f"Interactions JSONL path (default: {closure.DEFAULT_INPUT_PATH})",
+    )
+    label_closure_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="optional path to write closure labels as JSON Lines",
+    )
+    label_closure_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the closure report as JSON",
     )
 
     args = parser.parse_args(argv)
@@ -316,6 +340,59 @@ def main(argv: list[str] | None = None) -> int:
             print(f"holdout written: {args.holdout_out}")
         return 0
 
+    if args.command == "label-closure":
+        problem = _output_paths_error(args.input, args.out, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            labels, report = closure.label_closures(found)
+            if args.out:
+                staged.append(
+                    (args.out, closure.stage_closure_labels_jsonl(labels, args.out))
+                )
+            if args.report:
+                payload = {
+                    "total": report.total,
+                    "resolved": report.resolved,
+                    "uncertain": report.uncertain,
+                    "unresolved": report.unresolved,
+                    "needs_adjudication": report.needs_adjudication,
+                    "labeled": report.labeled,
+                    "label_rate": report.label_rate,
+                    "flagged_by_reason": dict(report.flagged_by_reason),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (interactions.InteractionsError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.total} interactions)",
+            f"resolved: {report.resolved}",
+            f"uncertain: {report.uncertain}",
+            f"unresolved: {report.unresolved}",
+            (
+                f"needs adjudication: {report.needs_adjudication} "
+                f"({report.adjudication_rate:.2%})"
+            ),
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"labels written: {args.out}")
+        return 0
+
     raise SystemExit(f"unknown command: {args.command}")
 
 
@@ -328,10 +405,15 @@ def _sample_split_path_error(
     """Reject sample-split outputs that would clobber an input or each other."""
     if (rag_out is None) != (holdout_out is None):
         return "provide both --rag-out and --holdout-out, or neither"
-    outputs = [path for path in (rag_out, holdout_out, report) if path is not None]
-    resolved = [path.resolve() for path in outputs] + [input_path.resolve()]
+    return _output_paths_error(input_path, rag_out, holdout_out, report)
+
+
+def _output_paths_error(input_path: Path, *outputs: Path | None) -> str | None:
+    """Reject outputs that would clobber the input or each other."""
+    provided = [path for path in outputs if path is not None]
+    resolved = [path.resolve() for path in provided] + [input_path.resolve()]
     if len(set(resolved)) != len(resolved):
-        return "sample outputs must be distinct from each other and from --in"
+        return "outputs must be distinct from each other and from --in"
     return None
 
 
