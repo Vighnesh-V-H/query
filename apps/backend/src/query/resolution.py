@@ -19,10 +19,11 @@ version — and the label provenance: ``source`` says whether the heuristics or
 the labeler decided the case, ``reason`` is the fixed heuristic reason or the
 labeler's one-line justification, ``flag_reason`` records what sent the case to
 adjudication, and ``model`` names the labeler for adjudicated cases. The build
-fails rather than emitting a partial join: the labels must cover exactly the
-input Interactions, with no missing, unknown, or duplicate entries. The report
-counts the sample per category and per source split, plus the retrieval-eligible
-volume.
+fails rather than emitting a partial join: the input Interactions must have
+unique ids, the labels must cover exactly them, and every label must carry the
+provenance its source requires, with no missing, unknown, duplicate, or
+provenance-inconsistent entries. The report counts the sample per category and
+per source split, plus the retrieval-eligible volume.
 """
 
 import json
