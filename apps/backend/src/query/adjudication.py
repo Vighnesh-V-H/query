@@ -442,6 +442,28 @@ def read_adjudicated_labels_jsonl(
     return tuple(labels)
 
 
+def label_provenance_error(
+    source: str, flag_reason: object, model: object
+) -> str | None:
+    """Return why a label's provenance does not match its source, if it does not.
+
+    A ``heuristic`` label must not carry labeler fields; a ``labeler`` label
+    must carry both the flag it resolved and the model that produced it.
+    Returns the problem without a location prefix, or ``None`` when the
+    provenance is valid. ``source`` must be one of :data:`LABEL_SOURCES`;
+    callers validate that first.
+    """
+    if source == "heuristic":
+        if flag_reason is not None or model is not None:
+            return "heuristic labels carry no flag_reason or model"
+        return None
+    if not isinstance(flag_reason, str) or not flag_reason:
+        return "labeler labels need a flag_reason"
+    if not isinstance(model, str) or not model:
+        return "labeler labels need a model"
+    return None
+
+
 def parse_adjudicated_label_record(
     record: object, location: str
 ) -> AdjudicatedLabel:
@@ -479,23 +501,11 @@ def parse_adjudicated_label_record(
         )
     flag_reason = record.get("flag_reason")
     model = record.get("model")
-    if source == "heuristic":
-        if flag_reason is not None or model is not None:
-            raise AdjudicationError(
-                f"malformed adjudicated label on {location}: heuristic labels "
-                "carry no flag_reason or model"
-            )
-    else:
-        if not isinstance(flag_reason, str) or not flag_reason:
-            raise AdjudicationError(
-                f"malformed adjudicated label on {location}: labeler labels "
-                "need a flag_reason"
-            )
-        if not isinstance(model, str) or not model:
-            raise AdjudicationError(
-                f"malformed adjudicated label on {location}: labeler labels "
-                "need a model"
-            )
+    provenance_error = label_provenance_error(source, flag_reason, model)
+    if provenance_error is not None:
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: {provenance_error}"
+        )
     return AdjudicatedLabel(
         interaction_id=interaction_id,
         label=label,

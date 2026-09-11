@@ -20,7 +20,7 @@ Ticket 8 turns the full labeled sample (ADR-0007) into the dataset everything do
 
 Only Resolved Cases are retrieval-eligible Historical Cases (ADR-0001, decision 4). `retrieval_eligible` is computed from the label at build time, so an Uncertain or Unresolved case cannot be hand-marked eligible; the dataset reader re-checks the flag against the label. The dataset keeps the whole labeled sample rather than only the Resolved Cases because downstream evaluation needs the negatives — retrieval indexes only the eligible records, but the golden-set and failure-analysis work can sample any of them.
 
-`dataset_version` is the record schema's contract version, bumped when a field changes meaning; the label provenance stays per record: `source` is `heuristic` or `labeler` (the heuristic vs LLM split), `reason` is the fixed heuristic reason or the labeler's one-line justification, `flag_reason` records what sent the case to adjudication, and `model` names the labeler that decided it. The build validates the join exactly — every input Interaction has exactly one label and no label references an unknown Interaction — and fails rather than emitting a partial dataset. The recorded report counts each category and each source split, plus the retrieval-eligible volume and share.
+`dataset_version` is the record schema's contract version, bumped when a field changes meaning; the label provenance stays per record: `source` is `heuristic` or `labeler` (the heuristic vs LLM split), `reason` is the fixed heuristic reason or the labeler's one-line justification, `flag_reason` records what sent the case to adjudication, and `model` names the labeler that decided it. The build validates the label contract and the join at its own boundary — every label carries the provenance its source requires (heuristics none, labelers both a flag and a model), every input Interaction has a unique id and exactly one label, and no label references an unknown Interaction — and fails rather than emitting a partial dataset. The recorded report counts each category and each source split, plus the retrieval-eligible volume and share.
 
 ## Considered Options
 
@@ -28,7 +28,7 @@ Only Resolved Cases are retrieval-eligible Historical Cases (ADR-0001, decision 
 - **Keep labels separate from content and reference Interactions by id**: rejected. Downstream would have to re-join two files and could drift; the content is already normalized and small (~2.5 MB), so embedding it makes the dataset the one thing a consumer reads.
 - **Store `retrieval_eligible` as an input field**: rejected. Deriving it from the label removes the failure mode where a bad join or a hand edit marks an Uncertain case as evidence.
 - **Version the dataset only in the report sidecar**: rejected. A record that does not declare its own schema version cannot be trusted once files are concatenated or copied, and the reader needs the version to reject incompatible snapshots.
-- **Skip validation and trust the label file**: rejected. A partial join would silently shrink the RAG index; the build fails loudly on missing, unknown, or duplicate labels instead.
+- **Skip validation and trust the label file**: rejected. A partial join would silently shrink the RAG index; the build fails loudly on missing, unknown, duplicate, or provenance-inconsistent labels, and on duplicate input Interactions, instead.
 
 ## Consequences
 

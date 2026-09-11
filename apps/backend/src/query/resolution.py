@@ -107,10 +107,10 @@ def build_resolution_dataset(
     """Join final labels onto Interactions and mark the retrieval-eligible ones.
 
     Returns one record per Interaction, in input order, and a report of the
-    label distribution per category and per source split. The labels must
-    cover exactly the input Interactions; any missing, unknown, duplicate, or
-    structurally invalid label fails the build instead of emitting a partial
-    dataset.
+    label distribution per category and per source split. The input
+    Interactions must have unique ids, and the labels must cover exactly
+    them; any missing, unknown, duplicate, or structurally invalid label
+    fails the build instead of emitting a partial dataset.
     """
     by_id = _index_labels(interactions, labels)
     records: list[ResolutionRecord] = []
@@ -176,12 +176,26 @@ def _index_labels(
             raise ResolutionDatasetError(
                 f"invalid source {label.source!r} for interaction {label.interaction_id}"
             )
+        provenance_error = adjudication.label_provenance_error(
+            label.source, label.flag_reason, label.model
+        )
+        if provenance_error is not None:
+            raise ResolutionDatasetError(
+                f"invalid label provenance for interaction "
+                f"{label.interaction_id}: {provenance_error}"
+            )
         if label.interaction_id in by_id:
             raise ResolutionDatasetError(
                 f"duplicate label for interaction {label.interaction_id}"
             )
         by_id[label.interaction_id] = label
-    input_ids = {interaction.interaction_id for interaction in interactions}
+    input_ids: set[int] = set()
+    for interaction in interactions:
+        if interaction.interaction_id in input_ids:
+            raise ResolutionDatasetError(
+                f"duplicate interaction_id {interaction.interaction_id} in the input"
+            )
+        input_ids.add(interaction.interaction_id)
     missing = sorted(input_ids - set(by_id))
     if missing:
         sample = ", ".join(str(interaction_id) for interaction_id in missing[:5])

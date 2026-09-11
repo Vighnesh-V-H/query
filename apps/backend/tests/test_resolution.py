@@ -234,6 +234,64 @@ class TestBuildResolutionDataset:
         with pytest.raises(resolution.ResolutionDatasetError, match="duplicate"):
             resolution.build_resolution_dataset(found, labels)
 
+    def test_duplicate_input_interactions_raise(self):
+        interaction = _interaction(
+            1, _turn(1, "customer", "a"), _turn(2, "brand", "b")
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="duplicate"):
+            resolution.build_resolution_dataset(
+                (interaction, interaction), (_heuristic(1, "resolved"),)
+            )
+
+    def test_heuristic_label_carrying_labeler_fields_raises(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="heuristic",
+                reason=HEURISTIC_REASON,
+                flag_reason=None,
+                model="test/labeler",
+            ),
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="heuristic"):
+            resolution.build_resolution_dataset(found, labels)
+
+    def test_labeler_label_without_flag_reason_raises(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="labeler",
+                reason="No visible confirmation of a fix.",
+                flag_reason=None,
+                model="test/labeler",
+            ),
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="flag_reason"):
+            resolution.build_resolution_dataset(found, labels)
+
+    def test_labeler_label_without_model_raises(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="labeler",
+                reason="No visible confirmation of a fix.",
+                flag_reason=closure_mod.REASON_BRAND_DM,
+                model=None,
+            ),
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="model"):
+            resolution.build_resolution_dataset(found, labels)
+
     def test_invalid_label_raises(self):
         found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
         labels = (_heuristic(1, "closed"),)
