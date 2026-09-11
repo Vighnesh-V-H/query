@@ -1001,6 +1001,12 @@ class TestReadAdjudicatedLabels:
         with pytest.raises(adjudication.AdjudicationError, match="expected an object"):
             adjudication.read_adjudicated_labels_jsonl(path)
 
+    def test_non_integer_interaction_id_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [self._record(interaction_id="1")])
+
+        with pytest.raises(adjudication.AdjudicationError, match="interaction_id"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
     def test_null_label_raises(self, tmp_path):
         path = self._write_records(tmp_path, [self._record(label=None)])
 

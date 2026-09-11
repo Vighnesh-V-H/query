@@ -315,6 +315,58 @@ class TestBuildResolutionDataset:
         with pytest.raises(resolution.ResolutionDatasetError, match="invalid source"):
             resolution.build_resolution_dataset(found, labels)
 
+    def test_non_int_interaction_id_types_raise(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+
+        for bad_id in ("1", True, 1.0):
+            labels = (
+                adjudication.AdjudicatedLabel(
+                    interaction_id=bad_id,
+                    label="resolved",
+                    source="heuristic",
+                    reason=HEURISTIC_REASON,
+                    flag_reason=None,
+                    model=None,
+                ),
+            )
+
+            with pytest.raises(
+                resolution.ResolutionDatasetError, match="interaction_id"
+            ):
+                resolution.build_resolution_dataset(found, labels)
+
+    def test_blank_reason_raises(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="heuristic",
+                reason="   ",
+                flag_reason=None,
+                model=None,
+            ),
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="reason"):
+            resolution.build_resolution_dataset(found, labels)
+
+    def test_non_string_reason_raises(self):
+        found = (_interaction(1, _turn(1, "customer", "a"), _turn(2, "brand", "b")),)
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="heuristic",
+                reason=None,
+                flag_reason=None,
+                model=None,
+            ),
+        )
+
+        with pytest.raises(resolution.ResolutionDatasetError, match="reason"):
+            resolution.build_resolution_dataset(found, labels)
+
 
 class TestResolutionDatasetJsonl:
     def _write_records(self, tmp_path, records):

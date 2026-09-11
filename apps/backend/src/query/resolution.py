@@ -166,24 +166,19 @@ def _index_labels(
     interactions: Sequence[Interaction],
     labels: Sequence[adjudication.AdjudicatedLabel],
 ) -> dict[int, adjudication.AdjudicatedLabel]:
-    """Index final labels by Interaction id and verify the join is exact."""
+    """Index final labels by Interaction id and verify the join is exact.
+
+    Every label is checked against the complete label contract the dataset
+    reader enforces (``adjudication.adjudicated_label_error``), so the build
+    cannot stage a dataset its own reader would reject.
+    """
     by_id: dict[int, adjudication.AdjudicatedLabel] = {}
     for label in labels:
-        if label.label not in closure.CLOSURE_LABELS:
+        contract_error = adjudication.adjudicated_label_error(label)
+        if contract_error is not None:
             raise ResolutionDatasetError(
-                f"invalid label {label.label!r} for interaction {label.interaction_id}"
-            )
-        if label.source not in adjudication.LABEL_SOURCES:
-            raise ResolutionDatasetError(
-                f"invalid source {label.source!r} for interaction {label.interaction_id}"
-            )
-        provenance_error = adjudication.label_provenance_error(
-            label.source, label.flag_reason, label.model
-        )
-        if provenance_error is not None:
-            raise ResolutionDatasetError(
-                f"invalid label provenance for interaction "
-                f"{label.interaction_id}: {provenance_error}"
+                f"invalid label for interaction {label.interaction_id}: "
+                f"{contract_error}"
             )
         if label.interaction_id in by_id:
             raise ResolutionDatasetError(
