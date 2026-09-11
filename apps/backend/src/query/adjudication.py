@@ -133,18 +133,32 @@ class AdjudicationCache:
         line = json.dumps(cached_verdict_to_json(verdict)) + "\n"
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._truncate_partial_tail()
+            self._repair_tail()
             with self.path.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line)
 
-    def _truncate_partial_tail(self) -> None:
-        """Drop a trailing line a killed writer left without its newline."""
+    def _repair_tail(self) -> None:
+        """Make a trailing line safe to append after.
+
+        A killed writer can leave the file without its final newline. When the
+        trailing bytes are already a complete record, keep them and terminate
+        the line so the next record starts fresh; only a genuinely partial or
+        malformed tail is dropped.
+        """
         if not self.path.is_file():
             return
         with self.path.open("r+b") as handle:
             data = handle.read()
-            if data and not data.endswith(b"\n"):
-                handle.truncate(data.rfind(b"\n") + 1)
+            if not data or data.endswith(b"\n"):
+                return
+            tail_start = data.rfind(b"\n") + 1
+            try:
+                tail = data[tail_start:].decode("utf-8")
+                _parse_cache_line(tail, str(self.path))
+            except (UnicodeDecodeError, AdjudicationError):
+                handle.truncate(tail_start)
+            else:
+                handle.write(b"\n")
 
 
 def adjudicate_closures(

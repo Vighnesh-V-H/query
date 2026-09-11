@@ -580,6 +580,48 @@ class TestAdjudicateClosures:
         assert verdicts[1].reason == "first"
         assert verdicts[2].reason == "second"
 
+    def test_cache_self_heals_unterminated_complete_tail(self, tmp_path):
+        path = tmp_path / "cache.jsonl"
+        first = json.dumps(
+            {
+                "interaction_id": 1,
+                "prompt_sha256": "a" * 64,
+                "label": "resolved",
+                "reason": "first",
+                "flag_reason": "y",
+                "model": "m",
+            }
+        )
+        second = json.dumps(
+            {
+                "interaction_id": 2,
+                "prompt_sha256": "b" * 64,
+                "label": "uncertain",
+                "reason": "second",
+                "flag_reason": "y",
+                "model": "m",
+            }
+        )
+        path.write_text(first + "\n" + second, encoding="utf-8")
+        cache = adjudication.AdjudicationCache(path)
+        cache.record(
+            adjudication.CachedVerdict(
+                interaction_id=3,
+                prompt_sha256="c" * 64,
+                label="unresolved",
+                reason="third",
+                flag_reason="y",
+                model="m",
+            )
+        )
+
+        verdicts = cache.verdicts()
+
+        assert list(verdicts) == [1, 2, 3]
+        assert verdicts[1].reason == "first"
+        assert verdicts[2].reason == "second"
+        assert verdicts[3].reason == "third"
+
     def test_cache_reader_uses_latest_record_for_an_interaction(self, tmp_path):
         path = tmp_path / "cache.jsonl"
         records = [
