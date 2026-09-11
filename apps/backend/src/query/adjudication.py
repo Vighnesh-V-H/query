@@ -133,8 +133,18 @@ class AdjudicationCache:
         line = json.dumps(cached_verdict_to_json(verdict)) + "\n"
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._truncate_partial_tail()
             with self.path.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line)
+
+    def _truncate_partial_tail(self) -> None:
+        """Drop a trailing line a killed writer left without its newline."""
+        if not self.path.is_file():
+            return
+        with self.path.open("r+b") as handle:
+            data = handle.read()
+            if data and not data.endswith(b"\n"):
+                handle.truncate(data.rfind(b"\n") + 1)
 
 
 def adjudicate_closures(
