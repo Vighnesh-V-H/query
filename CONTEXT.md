@@ -16,6 +16,10 @@ _Avoid_: conversation, thread, ticket
 The inbound tweet from a customer that opens an Interaction. In v0 the agent sees only this first message.
 _Avoid_: tweet, query
 
+**Intent**:
+The support theme of a Customer Message, labelled from the versioned final taxonomy (`docs/intent-taxonomy.md`); its support intents plus the `other` fallback cover every message.
+_Avoid_: category, topic, label (unqualified)
+
 **Resolved Case**:
 An Interaction with evidence of natural closure — an explicit customer acknowledgement, or a brand reply indicating the issue/action was completed.
 _Avoid_: closed thread, finished conversation
