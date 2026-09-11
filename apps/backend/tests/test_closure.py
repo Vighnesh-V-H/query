@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from query import cli
 from query import closure as closure_mod
 from query import interactions as interactions_mod
@@ -920,3 +922,117 @@ class TestLabelClosureCli:
         assert out_path.read_text(encoding="utf-8") == '{"previous": "labels"}\n'
         assert report_path.read_text(encoding="utf-8") == '{"previous": "report"}\n'
         assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+class TestReadClosureLabels:
+    def _write_records(self, tmp_path, records):
+        path = tmp_path / "closure-labels.jsonl"
+        path.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_round_trips_staged_labels(self, tmp_path):
+        found = (
+            _interaction(1, _turn(1, "customer", "hi"), _turn(2, "brand", "We've fixed it.")),
+            _interaction(2, _turn(1, "customer", "hi"), _turn(2, "brand", "Can you DM us?")),
+        )
+        labels, _ = closure_mod.label_closures(found)
+        path = tmp_path / "closure-labels.jsonl"
+        temporary = closure_mod.stage_closure_labels_jsonl(labels, path)
+        temporary.replace(path)
+
+        read_back = closure_mod.read_closure_labels_jsonl(path)
+
+        assert read_back == labels
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(closure_mod.ClosureLabelsError, match="does not exist"):
+            closure_mod.read_closure_labels_jsonl(tmp_path / "missing.jsonl")
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "closure-labels.jsonl"
+        path.write_text("not json\n", encoding="utf-8")
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="malformed JSON"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_non_object_line_raises(self, tmp_path):
+        path = tmp_path / "closure-labels.jsonl"
+        path.write_text("[1, 2]\n", encoding="utf-8")
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="expected an object"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_unknown_label_raises(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [{"interaction_id": 1, "label": "closed", "reason": "x", "needs_adjudication": False}],
+        )
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="invalid label"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_missing_reason_raises(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [{"interaction_id": 1, "label": "resolved", "reason": "", "needs_adjudication": False}],
+        )
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="invalid reason"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_flagged_record_must_have_null_label(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [
+                {
+                    "interaction_id": 1,
+                    "label": "resolved",
+                    "reason": "x",
+                    "needs_adjudication": True,
+                }
+            ],
+        )
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="needs_adjudication"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_labeled_record_must_not_need_adjudication(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [
+                {
+                    "interaction_id": 1,
+                    "label": None,
+                    "reason": "x",
+                    "needs_adjudication": False,
+                }
+            ],
+        )
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="needs_adjudication"):
+            closure_mod.read_closure_labels_jsonl(path)
+
+    def test_duplicate_interaction_ids_raise(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [
+                {
+                    "interaction_id": 1,
+                    "label": "resolved",
+                    "reason": "x",
+                    "needs_adjudication": False,
+                },
+                {
+                    "interaction_id": 1,
+                    "label": "resolved",
+                    "reason": "x",
+                    "needs_adjudication": False,
+                },
+            ],
+        )
+
+        with pytest.raises(closure_mod.ClosureLabelsError, match="duplicate"):
+            closure_mod.read_closure_labels_jsonl(path)

@@ -61,9 +61,14 @@ from query.interactions import Interaction, Turn
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_INPUT_PATH = REPO_ROOT / "data" / "rag-pool.jsonl"
+DEFAULT_LABELS_PATH = REPO_ROOT / "data" / "closure-labels.jsonl"
 
 CLOSURE_LABELS = ("resolved", "uncertain", "unresolved")
 Label = Literal["resolved", "uncertain", "unresolved"]
+
+
+class ClosureLabelsError(Exception):
+    """Raised when a closure labels JSONL file cannot be read."""
 
 REASON_CUSTOMER_CONTINUES = "customer keeps asking after the brand's last reply"
 REASON_CUSTOMER_RESOLVED = "customer's final message acknowledges the issue is resolved"
@@ -301,6 +306,79 @@ def stage_closure_labels_jsonl(
             pass
         raise
     return Path(temporary_name)
+
+
+def read_closure_labels_jsonl(
+    input_path: Path | str = DEFAULT_LABELS_PATH,
+) -> tuple[ClosureLabel, ...]:
+    """Read closure labels back from the JSON Lines format written above.
+
+    Inverse of :func:`stage_closure_labels_jsonl`: parses every record and
+    validates its structure and unique interaction ids, so the adjudication
+    stage never sees a malformed label file. Flagged records must carry
+    ``label: null`` with ``needs_adjudication: true``; labeled records the
+    opposite. Returns the labels in file order.
+    """
+    input_path = Path(input_path)
+    if not input_path.is_file():
+        raise ClosureLabelsError(f"closure labels JSONL does not exist: {input_path}")
+    labels = []
+    seen_ids: set[int] = set()
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            location = f"line {line_number} of {input_path}"
+            label = _parse_label_line(line, location)
+            if label.interaction_id in seen_ids:
+                raise ClosureLabelsError(
+                    f"duplicate interaction_id {label.interaction_id} on {location}"
+                )
+            seen_ids.add(label.interaction_id)
+            labels.append(label)
+    return tuple(labels)
+
+
+def _parse_label_line(line: str, location: str) -> ClosureLabel:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise ClosureLabelsError(f"malformed JSON on {location}: {exc}") from exc
+    if not isinstance(record, dict):
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: expected an object"
+        )
+    interaction_id = record.get("interaction_id")
+    if type(interaction_id) is not int:
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: invalid interaction_id"
+        )
+    label = record.get("label")
+    if label is not None and label not in CLOSURE_LABELS:
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: invalid label {label!r}"
+        )
+    reason = record.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: invalid reason"
+        )
+    needs_adjudication = record.get("needs_adjudication")
+    if not isinstance(needs_adjudication, bool):
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: invalid needs_adjudication"
+        )
+    if needs_adjudication != (label is None):
+        raise ClosureLabelsError(
+            f"malformed closure label on {location}: "
+            "needs_adjudication must match the presence of a label"
+        )
+    return ClosureLabel(
+        interaction_id=interaction_id,
+        label=label,
+        reason=reason,
+        needs_adjudication=needs_adjudication,
+    )
 
 
 def _normalize(text: str) -> str:
