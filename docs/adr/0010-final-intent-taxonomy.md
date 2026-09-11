@@ -21,6 +21,7 @@ The reconciliation decisions live in the document's two tables and are re-checke
 ## Consequences
 
 - The recorded reconciliation covers all 30 clusters and 3,000 messages: the 12 support intents receive 27 clusters and 2,524 messages (84.13%), and `other` receives the 3 junk clusters and 476 messages.
+- `data/intent-clusters.jsonl` is committed alongside the taxonomy — the one exception to the `data/` ignore rule — because it is the labeler snapshot the decisions cite and cannot be exactly reproduced. `query reconcile-intents` therefore runs on a fresh checkout, and a committed-artifact test fails when the document and the snapshot drift apart.
 - `presale_codes` is deliberately thin (23 messages, 0.77%): its share of the holdout may fall below the Golden Set's ~10-example floor, which is a recorded evaluation caveat, not a reason to hide the theme.
 - The classifier stages (tickets 13–14) and the dev-data labeling (ticket 12) import the final taxonomy only; the seed is frozen as evidence.
 - Rerunning `discover-intents` can move a cluster's mapping because the labeler is non-deterministic; `reconcile-intents` then fails until the decisions are reviewed, which is the intended drift signal. A taxonomy change — new intent, renamed id, changed definition — bumps the document version.

@@ -168,6 +168,7 @@ _BASE_FINAL_INTENTS = [
     ("zeta", "Zeta issues."),
     ("eta", "Eta issues."),
     ("theta", "Theta issues."),
+    (taxonomy.OTHER_INTENT_ID, "Fallback class."),
 ]
 
 
@@ -358,6 +359,31 @@ def test_final_taxonomy_rejects_empty_definition(tmp_path):
 
     with pytest.raises(taxonomy.TaxonomyError, match="empty definition"):
         taxonomy.read_final_taxonomy(_write(tmp_path, _final_document(*intents)))
+
+
+def test_final_taxonomy_rejects_missing_other_fallback(tmp_path):
+    intents = [
+        (intent_id, definition)
+        for intent_id, definition in _BASE_FINAL_INTENTS
+        if intent_id != taxonomy.OTHER_INTENT_ID
+    ]
+    document = _final_document(
+        *intents,
+        examples=[(intent_id, f"{intent_id} example") for intent_id, _ in intents],
+    )
+
+    with pytest.raises(taxonomy.TaxonomyError, match="no 'other' fallback"):
+        taxonomy.read_final_taxonomy(_write(tmp_path, document))
+
+
+def test_final_taxonomy_rejects_malformed_example(tmp_path):
+    document = _valid_final_document().replace(
+        "- `gamma` [123]: gamma example\n",
+        "- `gamma` gamma example\n",
+    )
+
+    with pytest.raises(taxonomy.TaxonomyError, match="malformed example"):
+        taxonomy.read_final_taxonomy(_write(tmp_path, document))
 
 
 def test_final_taxonomy_rejects_intent_without_example(tmp_path):

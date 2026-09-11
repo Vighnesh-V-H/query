@@ -297,28 +297,23 @@ def test_duplicate_seed_decision_raises():
         reconciliation.reconcile_intents(_base_clusters(), _base_seeds(), final)
 
 
-def test_committed_documents_reconcile():
+def test_committed_artifact_reconciles():
+    clusters = discovery.read_intent_clusters_jsonl()
     seeds = taxonomy.read_seed_taxonomy()
     final = taxonomy.read_final_taxonomy()
-    clusters = []
-    next_id = 100
-    for decision in final.seed_decisions:
-        if decision.decision == taxonomy.DROPPED:
-            continue
-        clusters.append(_cluster(next_id, 10, decision.seed_intent))
-        next_id += 1
-    for theme in final.new_theme_decisions:
-        clusters.append(_cluster(theme.cluster_id, 5, discovery.MAPPING_NEW))
-    clusters.append(_cluster(next_id, 7, discovery.MAPPING_JUNK))
 
     report = reconciliation.reconcile_intents(clusters, seeds, final)
 
     assert report.taxonomy_version == final.version
-    assert report.clusters == len(clusters)
-    assert report.messages == 12 * 10 + 5 + 7
-    assert report.covered_messages == 12 * 10 + 5
+    assert report.clusters == 30
+    assert report.messages == 3000
+    assert report.covered_messages == 2524
+    assert report.covered_share == pytest.approx(2524 / 3000)
+    assert report.per_intent["account"] == reconciliation.IntentCoverage(3, 332)
+    assert report.per_intent["billing_payment"] == reconciliation.IntentCoverage(5, 490)
+    assert report.per_intent["presale_codes"] == reconciliation.IntentCoverage(1, 23)
     assert report.per_intent[taxonomy.OTHER_INTENT_ID] == (
-        reconciliation.IntentCoverage(1, 7)
+        reconciliation.IntentCoverage(3, 476)
     )
     assert all(
         counts.clusters >= 1

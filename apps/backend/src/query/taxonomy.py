@@ -12,11 +12,11 @@ Both readers are strict about the parts the pipeline depends on. The seed
 reader requires every table row to carry a backticked snake_case id and a
 non-empty definition, and every intent exactly one representative message. The
 final reader additionally requires the 8-15 intent target from the
-specification, at least one example per intent, and a recorded reconciliation
-decision for every seed intent and every discovered theme. A document that
-fails these checks raises instead of silently returning a partial taxonomy; a
-renamed or dropped row is a taxonomy change that should be visible, not
-absorbed.
+specification, the `other` fallback class, at least one well-formed example per
+intent, and a recorded reconciliation decision for every seed intent and every
+discovered theme. A document that fails these checks raises instead of silently
+returning a partial taxonomy; a renamed or dropped row is a taxonomy change
+that should be visible, not absorbed.
 """
 
 import re
@@ -239,9 +239,9 @@ def read_final_taxonomy(
     Returns the version, the intents in document order with at least one
     example each, and the recorded reconciliation decisions. Raises
     :class:`TaxonomyError` when the file is missing, the version is missing or
-    malformed, the intent count leaves the 8-15 target, a row, example, or
-    decision is malformed or duplicated, or a decision points at an intent the
-    document does not define.
+    malformed, the intent count leaves the 8-15 target, the `other` fallback
+    is absent, a row, example, or decision is malformed or duplicated, or a
+    decision points at an intent the document does not define.
     """
     path = Path(path)
     if not path.is_file():
@@ -251,6 +251,10 @@ def read_final_taxonomy(
     intents = _read_final_intents(lines, path)
     intents = _attach_final_examples(intents, _read_final_examples(lines, path), path)
     intent_ids = tuple(intent.intent_id for intent in intents)
+    if OTHER_INTENT_ID not in intent_ids:
+        raise TaxonomyError(
+            f"final taxonomy has no {OTHER_INTENT_ID!r} fallback in {path}"
+        )
     return FinalTaxonomy(
         version=version,
         intents=intents,
@@ -333,12 +337,19 @@ def _read_final_examples(
         )
     examples: dict[str, list[tuple[str, int]]] = {}
     for index in range(headings[0] + 1, len(lines)):
-        if lines[index].strip().startswith("## "):
+        stripped = lines[index].strip()
+        if stripped.startswith("## "):
             break
-        match = _REPRESENTATIVE.match(lines[index].strip())
+        if not stripped:
+            continue
+        match = _REPRESENTATIVE.match(stripped)
         if match:
             intent_id, message = match.groups()
             examples.setdefault(intent_id, []).append((message.strip(), index + 1))
+        elif stripped == "-" or stripped.startswith("- "):
+            raise TaxonomyError(
+                f"malformed example on line {index + 1} of {path}: {stripped!r}"
+            )
     return examples
 
 
