@@ -56,8 +56,9 @@ TAXONOMY = (
     "- resolved: evidence of natural closure — the customer explicitly confirms "
     "the issue is solved, or the brand's final reply says the issue/action was "
     "completed.\n"
-    "- uncertain: the brand replied and the customer went silent, with no "
-    "visible evidence the issue was actually solved.\n"
+    "- uncertain: the visible conversation ends without evidence the issue was "
+    "actually solved — typically the customer went silent, but also when their "
+    "final message neither confirms resolution nor continues the issue.\n"
     "- unresolved: the customer keeps asking, or the brand indicated it could "
     "not help."
 )
@@ -278,20 +279,30 @@ def read_adjudication_cache(input_path: Path | str) -> dict[int, CachedVerdict]:
     """Read the resumable verdict cache; a missing file is an empty cache.
 
     The cache is an append-only log, so the last record for an Interaction wins
-    (a recomputed verdict supersedes a stale one). Malformed records fail the
-    run rather than silently dropping verdicts.
+    (a recomputed verdict supersedes a stale one). Every writer terminates a
+    record with a newline, so a malformed final line without one can only be a
+    write cut short by an interruption or a full disk: it is dropped so earlier
+    verdicts still resume the run. Any other malformed record fails the run
+    rather than silently dropping verdicts.
     """
     input_path = Path(input_path)
     if not input_path.is_file():
         return {}
+    data = input_path.read_text(encoding="utf-8")
+    complete = data.endswith("\n")
+    lines = data.splitlines()
     verdicts: dict[int, CachedVerdict] = {}
-    with input_path.open("r", encoding="utf-8") as handle:
-        for line_number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            location = f"line {line_number} of {input_path}"
+    for line_number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue
+        location = f"line {line_number} of {input_path}"
+        try:
             verdict = _parse_cache_line(line, location)
-            verdicts[verdict.interaction_id] = verdict
+        except AdjudicationError:
+            if line_number == len(lines) and not complete:
+                break
+            raise
+        verdicts[verdict.interaction_id] = verdict
     return verdicts
 
 

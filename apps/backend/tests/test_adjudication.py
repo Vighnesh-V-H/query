@@ -124,6 +124,24 @@ class TestAdjudicateClosures:
         assert report.flagged_by_reason == {heuristic[0].reason: 1}
         assert report.models == ("test/labeler",)
 
+    def test_prompt_covers_unclear_customer_endings_under_uncertain(self):
+        found = (
+            _interaction(
+                1,
+                _turn(1, "customer", "where is my order"),
+                _turn(2, "brand", "We'll pass this to the right team."),
+                _turn(3, "customer", "Interesting."),
+            ),
+        )
+        heuristic, _ = closure_mod.label_closures(found)
+        assert heuristic[0].needs_adjudication is True
+        assert heuristic[0].reason == closure_mod.REASON_CUSTOMER_UNCLEAR
+
+        prompt = adjudication.build_prompt(found[0], heuristic[0].reason)
+
+        assert "went silent" in prompt
+        assert "neither confirms resolution nor continues the issue" in prompt
+
     def test_labeler_can_recover_resolved_from_flagged_case(self):
         found = (
             _interaction(
@@ -488,6 +506,28 @@ class TestAdjudicateClosures:
 
         with pytest.raises(adjudication.AdjudicationError, match="malformed JSON"):
             adjudication.read_adjudication_cache(path)
+
+    def test_cache_reader_drops_partial_trailing_record(self, tmp_path):
+        path = tmp_path / "cache.jsonl"
+        valid = json.dumps(
+            {
+                "interaction_id": 1,
+                "prompt_sha256": "a" * 64,
+                "label": "resolved",
+                "reason": "first",
+                "flag_reason": "y",
+                "model": "m",
+            }
+        )
+        path.write_text(
+            valid + "\n" + '{"interaction_id": 2, "prompt_sha',
+            encoding="utf-8",
+        )
+
+        verdicts = adjudication.read_adjudication_cache(path)
+
+        assert list(verdicts) == [1]
+        assert verdicts[1].reason == "first"
 
     def test_cache_reader_rejects_invalid_label(self, tmp_path):
         path = tmp_path / "cache.jsonl"
