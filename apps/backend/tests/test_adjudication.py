@@ -934,3 +934,132 @@ class TestAdjudicateClosuresCli:
         assert out_path.read_text(encoding="utf-8") == '{"previous": "labels"}\n'
         assert report_path.read_text(encoding="utf-8") == '{"previous": "report"}\n'
         assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+class TestReadAdjudicatedLabels:
+    def _write_records(self, tmp_path, records):
+        path = tmp_path / "closure-labels-final.jsonl"
+        path.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+        return path
+
+    def _record(self, **overrides):
+        record = {
+            "interaction_id": 1,
+            "label": "resolved",
+            "source": "heuristic",
+            "reason": "customer's final message acknowledges the issue is resolved",
+            "flag_reason": None,
+            "model": None,
+        }
+        record.update(overrides)
+        return record
+
+    def test_round_trips_staged_labels(self, tmp_path):
+        labels = (
+            adjudication.AdjudicatedLabel(
+                interaction_id=1,
+                label="resolved",
+                source="heuristic",
+                reason="customer's final message acknowledges the issue is resolved",
+                flag_reason=None,
+                model=None,
+            ),
+            adjudication.AdjudicatedLabel(
+                interaction_id=2,
+                label="uncertain",
+                source="labeler",
+                reason="The visible thread never confirms a fix.",
+                flag_reason=closure_mod.REASON_BRAND_DM,
+                model="test/labeler",
+            ),
+        )
+        path = tmp_path / "closure-labels-final.jsonl"
+        temporary = adjudication.stage_adjudicated_labels_jsonl(labels, path)
+        temporary.replace(path)
+
+        read_back = adjudication.read_adjudicated_labels_jsonl(path)
+
+        assert read_back == labels
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(adjudication.AdjudicationError, match="does not exist"):
+            adjudication.read_adjudicated_labels_jsonl(tmp_path / "missing.jsonl")
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "closure-labels-final.jsonl"
+        path.write_text("not json\n", encoding="utf-8")
+
+        with pytest.raises(adjudication.AdjudicationError, match="malformed JSON"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_non_object_line_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [[1, 2]])
+
+        with pytest.raises(adjudication.AdjudicationError, match="expected an object"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_null_label_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [self._record(label=None)])
+
+        with pytest.raises(adjudication.AdjudicationError, match="invalid label"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_unknown_label_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [self._record(label="closed")])
+
+        with pytest.raises(adjudication.AdjudicationError, match="invalid label"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_unknown_source_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [self._record(source="model")])
+
+        with pytest.raises(adjudication.AdjudicationError, match="invalid source"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_missing_reason_raises(self, tmp_path):
+        path = self._write_records(tmp_path, [self._record(reason=" ")])
+
+        with pytest.raises(adjudication.AdjudicationError, match="invalid reason"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_heuristic_record_carrying_labeler_fields_raises(self, tmp_path):
+        path = self._write_records(
+            tmp_path, [self._record(model="test/labeler")]
+        )
+
+        with pytest.raises(adjudication.AdjudicationError, match="heuristic"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_labeler_record_without_flag_reason_raises(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [self._record(source="labeler", model="test/labeler")],
+        )
+
+        with pytest.raises(adjudication.AdjudicationError, match="flag_reason"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_labeler_record_without_model_raises(self, tmp_path):
+        path = self._write_records(
+            tmp_path,
+            [
+                self._record(
+                    source="labeler",
+                    flag_reason=closure_mod.REASON_BRAND_DM,
+                )
+            ],
+        )
+
+        with pytest.raises(adjudication.AdjudicationError, match="model"):
+            adjudication.read_adjudicated_labels_jsonl(path)
+
+    def test_duplicate_interaction_ids_raise(self, tmp_path):
+        path = self._write_records(
+            tmp_path, [self._record(), self._record()]
+        )
+
+        with pytest.raises(adjudication.AdjudicationError, match="duplicate"):
+            adjudication.read_adjudicated_labels_jsonl(path)
