@@ -36,14 +36,13 @@ import hashlib
 import json
 import os
 import tempfile
-import threading
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from query import closure, llm
+from query import cachefile, closure, llm
 
 DEFAULT_INTERACTIONS_PATH = closure.DEFAULT_INPUT_PATH
 DEFAULT_LABELS_PATH = closure.DEFAULT_LABELS_PATH
@@ -120,48 +119,27 @@ class AdjudicationCache:
 
     Callers load the verdicts once before a run and let every completed
     adjudication be recorded immediately, so a run killed mid-way resumes
-    without paying for calls it already made.
+    without paying for calls it already made. The crash-safe append and
+    tail-repair mechanics live in :mod:`query.cachefile`.
     """
 
     def __init__(self, path: Path | str):
         self.path = Path(path)
-        self._lock = threading.Lock()
+        self._cache = cachefile.AppendOnlyCache(
+            self.path,
+            serialize=cached_verdict_to_json,
+            parse=_parse_cache_line,
+            key=lambda verdict: verdict.interaction_id,
+            error_type=AdjudicationError,
+        )
 
     def verdicts(self) -> dict[int, CachedVerdict]:
         """Read the cached verdicts; a missing cache file is an empty cache."""
-        return read_adjudication_cache(self.path)
+        return self._cache.entries()
 
     def record(self, verdict: CachedVerdict) -> None:
         """Append one verdict, atomically with respect to worker threads."""
-        line = json.dumps(cached_verdict_to_json(verdict)) + "\n"
-        with self._lock:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._repair_tail()
-            with self.path.open("a", encoding="utf-8", newline="\n") as handle:
-                handle.write(line)
-
-    def _repair_tail(self) -> None:
-        """Make a trailing line safe to append after.
-
-        A killed writer can leave the file without its final newline. When the
-        trailing bytes are already a complete record, keep them and terminate
-        the line so the next record starts fresh; only a genuinely partial or
-        malformed tail is dropped.
-        """
-        if not self.path.is_file():
-            return
-        with self.path.open("r+b") as handle:
-            data = handle.read()
-            if not data or data.endswith(b"\n"):
-                return
-            tail_start = data.rfind(b"\n") + 1
-            try:
-                tail = data[tail_start:].decode("utf-8")
-                _parse_cache_line(tail, str(self.path))
-            except (UnicodeDecodeError, AdjudicationError):
-                handle.truncate(tail_start)
-            else:
-                handle.write(b"\n")
+        self._cache.record(verdict)
 
 
 def adjudicate_closures(
@@ -306,31 +284,16 @@ def read_adjudication_cache(input_path: Path | str) -> dict[int, CachedVerdict]:
     """Read the resumable verdict cache; a missing file is an empty cache.
 
     The cache is an append-only log, so the last record for an Interaction wins
-    (a recomputed verdict supersedes a stale one). Every writer terminates a
-    record with a newline, so a malformed final line without one can only be a
-    write cut short by an interruption or a full disk: it is dropped so earlier
-    verdicts still resume the run. Any other malformed record fails the run
-    rather than silently dropping verdicts.
+    (a recomputed verdict supersedes a stale one). A trailing record cut short
+    by an interruption is dropped so earlier verdicts still resume the run;
+    any other malformed record fails the run.
     """
-    input_path = Path(input_path)
-    if not input_path.is_file():
-        return {}
-    data = input_path.read_text(encoding="utf-8")
-    complete = data.endswith("\n")
-    lines = data.splitlines()
-    verdicts: dict[int, CachedVerdict] = {}
-    for line_number, line in enumerate(lines, start=1):
-        if not line.strip():
-            continue
-        location = f"line {line_number} of {input_path}"
-        try:
-            verdict = _parse_cache_line(line, location)
-        except AdjudicationError:
-            if line_number == len(lines) and not complete:
-                break
-            raise
-        verdicts[verdict.interaction_id] = verdict
-    return verdicts
+    return cachefile.read_cache(
+        input_path,
+        _parse_cache_line,
+        key=lambda verdict: verdict.interaction_id,
+        error_type=AdjudicationError,
+    )
 
 
 def _parse_cache_line(line: str, location: str) -> CachedVerdict:
@@ -644,7 +607,7 @@ def _call_labeler(
 
 def _parse_reply(interaction_id: int, content: str) -> tuple[closure.Label, str]:
     """Validate the labeler's reply and normalize the justification."""
-    payload = _extract_json(content)
+    payload = llm.extract_json_object(content)
     if payload is None:
         raise AdjudicationError(
             f"labeler returned no JSON object for interaction {interaction_id}: "
@@ -661,25 +624,3 @@ def _parse_reply(interaction_id: int, content: str) -> tuple[closure.Label, str]
             f"labeler returned an empty justification for interaction {interaction_id}"
         )
     return label, " ".join(justification.split())
-
-
-def _extract_json(content: str) -> dict | None:
-    """Find a JSON object in a reply, tolerating code fences and prose."""
-    text = content.strip()
-    if text.startswith("```"):
-        text = text.removeprefix("```").removesuffix("```").strip()
-        if text[:4].lower() == "json":
-            text = text[4:].lstrip()
-    candidates = [text]
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start : end + 1])
-    for candidate in candidates:
-        try:
-            payload = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(payload, dict):
-            return payload
-    return None

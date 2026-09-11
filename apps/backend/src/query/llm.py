@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 from openai import OpenAI
@@ -39,3 +40,25 @@ def call_llm(
         raise RuntimeError(f"model '{model}' returned no choices (upstream error or rate limit)")
     content = response.choices[0].message.content or ""
     return LLMReply(content=content, model=model)
+
+
+def extract_json_object(content: str) -> dict | None:
+    """Find a JSON object in a model reply, tolerating code fences and prose."""
+    text = content.strip()
+    if text.startswith("```"):
+        text = text.removeprefix("```").removesuffix("```").strip()
+        if text[:4].lower() == "json":
+            text = text[4:].lstrip()
+    candidates = [text]
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(text[start : end + 1])
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
