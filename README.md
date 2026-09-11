@@ -80,6 +80,16 @@ uv run --package query query label-closure --in data/rag-pool.jsonl --out data/c
 
 Each output line is one Interaction's `{interaction_id, label, reason, needs_adjudication}`. The heuristics label 1,694 of the 3,000 RAG-pool Interactions definitively (190 Resolved, 1,317 Uncertain, 187 Unresolved); 1,306 (43.5%) are flagged for adjudication, 94% of them involving a move to DMs — the ambiguous middle reserved for ticket 7. A flagged record has `label: null` — it is not evidence of anything, and downstream stages must adjudicate it before it can be used. `--in` defaults to `data/rag-pool.jsonl`; `--out` and `--report` are optional and must not collide with `--in` or each other.
 
+## Adjudicate flagged closures
+
+Resolve the ambiguous endings the heuristics flagged — mostly DM deflections — with the configured labeler role and write the full labeled sample (see `docs/adr/0007-closure-llm-adjudication.md`):
+
+```sh
+uv run --package query query adjudicate-closures --in data/rag-pool.jsonl --labels data/closure-labels.jsonl --out data/closure-labels-final.jsonl --report data/closure-adjudication-report.json --workers 8 --cache data/closure-adjudication-cache.jsonl
+```
+
+Each output line is one Interaction's final `{interaction_id, label, source, reason, flag_reason, model}`: flagged cases get a labeler verdict with a one-line justification, everything else keeps its heuristic label. The committed snapshot labels all 3,000 RAG-pool Interactions — 215 Resolved, 2,569 Uncertain, 216 Unresolved — recovering 25 Resolved and 29 Unresolved from the 1,306 flagged cases. The labeler is the only non-deterministic stage, so rerunning can move the ambiguous middle. `--workers` bounds concurrent calls and `--cache` records each verdict as it completes so an interrupted run resumes without re-calling; `--in` and `--labels` default to the RAG pool and heuristic labels, and all paths must be distinct.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
