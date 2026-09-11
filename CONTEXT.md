@@ -21,7 +21,7 @@ An Interaction with evidence of natural closure — an explicit customer acknowl
 _Avoid_: closed thread, finished conversation
 
 **Uncertain Case**:
-An Interaction where the brand replied but the customer stopped responding, with no evidence the issue was actually solved.
+An Interaction whose visible ending shows no evidence the issue was actually solved — typically the customer stopped responding after the brand's reply, but also when the customer's final message neither confirms resolution nor continues the issue.
 _Avoid_: resolved, unanswered
 
 **Unresolved Case**:

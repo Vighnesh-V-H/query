@@ -5,7 +5,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-from query import closure, config, english, interactions, llm, sampling, source
+from query import (
+    adjudication,
+    closure,
+    config,
+    english,
+    interactions,
+    llm,
+    sampling,
+    source,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -154,6 +163,48 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write the closure report as JSON",
+    )
+
+    adjudicate_parser = sub.add_parser(
+        "adjudicate-closures",
+        help="adjudicate flagged closures with the labeler role and write the full labeled sample",
+    )
+    adjudicate_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=adjudication.DEFAULT_INTERACTIONS_PATH,
+        help=f"Interactions JSONL path (default: {adjudication.DEFAULT_INTERACTIONS_PATH})",
+    )
+    adjudicate_parser.add_argument(
+        "--labels",
+        type=Path,
+        default=adjudication.DEFAULT_LABELS_PATH,
+        help=f"heuristic closure labels JSONL path (default: {adjudication.DEFAULT_LABELS_PATH})",
+    )
+    adjudicate_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="optional path to write the full labeled sample as JSON Lines",
+    )
+    adjudicate_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the adjudication report as JSON",
+    )
+    adjudicate_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+    adjudicate_parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="optional JSONL cache of labeler verdicts; matching entries are reused until the file is deleted",
     )
 
     args = parser.parse_args(argv)
@@ -393,6 +444,84 @@ def main(argv: list[str] | None = None) -> int:
             print(f"labels written: {args.out}")
         return 0
 
+    if args.command == "adjudicate-closures":
+        problem = _output_paths_error(
+            args.input,
+            args.labels,
+            args.out,
+            args.report,
+            args.cache,
+            message="paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            heuristic = closure.read_closure_labels_jsonl(args.labels)
+            cache = adjudication.AdjudicationCache(args.cache) if args.cache else None
+            labels, report = adjudication.adjudicate_closures(
+                found, heuristic, workers=args.workers, cache=cache
+            )
+            if args.out:
+                staged.append(
+                    (
+                        args.out,
+                        adjudication.stage_adjudicated_labels_jsonl(labels, args.out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "total": report.total,
+                    "resolved": report.resolved,
+                    "uncertain": report.uncertain,
+                    "unresolved": report.unresolved,
+                    "adjudicated": report.adjudicated,
+                    "heuristic": {
+                        "resolved": report.heuristic_resolved,
+                        "uncertain": report.heuristic_uncertain,
+                        "unresolved": report.heuristic_unresolved,
+                    },
+                    "adjudicated_labels": {
+                        "resolved": report.adjudicated_resolved,
+                        "uncertain": report.adjudicated_uncertain,
+                        "unresolved": report.adjudicated_unresolved,
+                    },
+                    "flagged_by_reason": dict(report.flagged_by_reason),
+                    "models": list(report.models),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            closure.ClosureLabelsError,
+            adjudication.AdjudicationError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.total} interactions)",
+            f"adjudicated: {report.adjudicated} flagged",
+            f"resolved: {report.resolved}",
+            f"uncertain: {report.uncertain}",
+            f"unresolved: {report.unresolved}",
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"labels written: {args.out}")
+        return 0
+
     raise SystemExit(f"unknown command: {args.command}")
 
 
@@ -415,13 +544,12 @@ def _sample_split_path_error(
 
 
 def _output_paths_error(
-    input_path: Path,
-    *outputs: Path | None,
+    *paths: Path | None,
     message: str = "outputs must be distinct from each other and from --in",
 ) -> str | None:
-    """Reject outputs that would clobber the input or each other."""
-    provided = [path for path in outputs if path is not None]
-    resolved = [path.resolve() for path in provided] + [input_path.resolve()]
+    """Reject a set of paths that would clobber each other or an input."""
+    provided = [path for path in paths if path is not None]
+    resolved = [path.resolve() for path in provided]
     if len(set(resolved)) != len(resolved):
         return message
     return None
