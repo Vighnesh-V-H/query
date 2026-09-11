@@ -537,6 +537,8 @@ class TestResolutionCli:
         assert "uncertain: 1" in output
         assert "unresolved: 0" in output
         assert "retrieval-eligible: 2 (66.67%)" in output
+        assert "heuristic: 1 (resolved 1, uncertain 0, unresolved 0)" in output
+        assert "labeler: 2 (resolved 1, uncertain 1, unresolved 0)" in output
         assert f"dataset written: {out_path}" in output
         assert f"report written: {report_path}" in output
 
@@ -595,6 +597,8 @@ class TestResolutionCli:
 
         output = capsys.readouterr().out
         assert "retrieval-eligible: 1 (100.00%)" in output
+        assert "heuristic: 1 (resolved 1, uncertain 0, unresolved 0)" in output
+        assert "labeler: 0 (resolved 0, uncertain 0, unresolved 0)" in output
         assert "dataset written:" not in output
         assert "report written:" not in output
 

@@ -33,8 +33,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from query import adjudication, closure, interactions
-from query.interactions import Interaction
+from query import adjudication, closure
+from query.interactions import (
+    Interaction,
+    InteractionsError,
+    interaction_to_json,
+    parse_interaction_record,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_INTERACTIONS_PATH = closure.DEFAULT_INPUT_PATH
@@ -96,7 +101,7 @@ class ResolutionReport:
 
 
 def build_resolution_dataset(
-    found: Sequence[Interaction],
+    interactions: Sequence[Interaction],
     labels: Sequence[adjudication.AdjudicatedLabel],
 ) -> tuple[tuple[ResolutionRecord, ...], ResolutionReport]:
     """Join final labels onto Interactions and mark the retrieval-eligible ones.
@@ -107,7 +112,7 @@ def build_resolution_dataset(
     structurally invalid label fails the build instead of emitting a partial
     dataset.
     """
-    by_id = _index_labels(found, labels)
+    by_id = _index_labels(interactions, labels)
     records: list[ResolutionRecord] = []
     counts = {"resolved": 0, "uncertain": 0, "unresolved": 0}
     source_counts = {
@@ -115,7 +120,7 @@ def build_resolution_dataset(
         "labeler": {"resolved": 0, "uncertain": 0, "unresolved": 0},
     }
     models: list[str] = []
-    for interaction in found:
+    for interaction in interactions:
         label = by_id[interaction.interaction_id]
         records.append(
             ResolutionRecord(
@@ -135,7 +140,7 @@ def build_resolution_dataset(
             models.append(label.model)
     report = ResolutionReport(
         dataset_version=DATASET_VERSION,
-        total=len(found),
+        total=len(interactions),
         resolved=counts["resolved"],
         uncertain=counts["uncertain"],
         unresolved=counts["unresolved"],
@@ -157,7 +162,7 @@ def _source_counts(counts: Mapping[str, int]) -> SourceCounts:
 
 
 def _index_labels(
-    found: Sequence[Interaction],
+    interactions: Sequence[Interaction],
     labels: Sequence[adjudication.AdjudicatedLabel],
 ) -> dict[int, adjudication.AdjudicatedLabel]:
     """Index final labels by Interaction id and verify the join is exact."""
@@ -176,7 +181,7 @@ def _index_labels(
                 f"duplicate label for interaction {label.interaction_id}"
             )
         by_id[label.interaction_id] = label
-    input_ids = {interaction.interaction_id for interaction in found}
+    input_ids = {interaction.interaction_id for interaction in interactions}
     missing = sorted(input_ids - set(by_id))
     if missing:
         sample = ", ".join(str(interaction_id) for interaction_id in missing[:5])
@@ -195,7 +200,7 @@ def _index_labels(
 
 def record_to_json(record: ResolutionRecord) -> dict:
     """Serialize a ResolutionRecord to a JSON-compatible mapping."""
-    content = interactions.interaction_to_json(record.interaction)
+    content = interaction_to_json(record.interaction)
     return {
         "interaction_id": record.interaction_id,
         "dataset_version": record.dataset_version,
@@ -290,10 +295,10 @@ def _parse_record(record: object, location: str) -> ResolutionRecord:
         )
     try:
         label = adjudication.parse_adjudicated_label_record(record, location)
-        interaction = interactions.parse_interaction_record(record, location)
+        interaction = parse_interaction_record(record, location)
     except (
         adjudication.AdjudicationError,
-        interactions.InteractionsError,
+        InteractionsError,
     ) as exc:
         raise ResolutionDatasetError(str(exc)) from exc
     retrieval_eligible = record.get("retrieval_eligible")

@@ -580,18 +580,8 @@ def main(argv: list[str] | None = None) -> int:
                     "retrieval_eligible": report.retrieval_eligible,
                     "retrieval_share": report.retrieval_share,
                     "by_source": {
-                        "heuristic": {
-                            "total": report.heuristic.total,
-                            "resolved": report.heuristic.resolved,
-                            "uncertain": report.heuristic.uncertain,
-                            "unresolved": report.heuristic.unresolved,
-                        },
-                        "labeler": {
-                            "total": report.labeler.total,
-                            "resolved": report.labeler.resolved,
-                            "uncertain": report.labeler.uncertain,
-                            "unresolved": report.labeler.unresolved,
-                        },
+                        "heuristic": _source_split_json(report.heuristic),
+                        "labeler": _source_split_json(report.labeler),
                     },
                     "models": list(report.models),
                 }
@@ -621,6 +611,8 @@ def main(argv: list[str] | None = None) -> int:
                 f"retrieval-eligible: {report.retrieval_eligible} "
                 f"({report.retrieval_share:.2%})"
             ),
+            f"heuristic: {_source_split_summary(report.heuristic)}",
+            f"labeler: {_source_split_summary(report.labeler)}",
         ]
         for line in lines:
             print(line)
@@ -661,6 +653,24 @@ def _output_paths_error(
     if len(set(resolved)) != len(resolved):
         return message
     return None
+
+
+def _source_split_json(counts: resolution.SourceCounts) -> dict:
+    """Serialize one provenance split's category counts."""
+    return {
+        "total": counts.total,
+        "resolved": counts.resolved,
+        "uncertain": counts.uncertain,
+        "unresolved": counts.unresolved,
+    }
+
+
+def _source_split_summary(counts: resolution.SourceCounts) -> str:
+    """Render one provenance split's category counts for the console."""
+    return (
+        f"{counts.total} (resolved {counts.resolved}, "
+        f"uncertain {counts.uncertain}, unresolved {counts.unresolved})"
+    )
 
 
 def _write_json_report(path: Path, payload: dict) -> None:
