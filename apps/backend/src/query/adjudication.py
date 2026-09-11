@@ -464,6 +464,27 @@ def label_provenance_error(
     return None
 
 
+def adjudicated_label_error(label: AdjudicatedLabel) -> str | None:
+    """Return why a final label does not satisfy the label contract, if it does not.
+
+    The single contract shared by the label reader and by stages whose records
+    embed a final label: a build boundary that validates through this function
+    provably emits labels the reader accepts. Returns the problem without a
+    location prefix, or ``None`` when the label is valid. A ``heuristic`` label
+    must not carry labeler fields; a ``labeler`` label must carry both the flag
+    it resolved and the model that produced it.
+    """
+    if type(label.interaction_id) is not int:
+        return "invalid interaction_id"
+    if label.label not in closure.CLOSURE_LABELS:
+        return f"invalid label {label.label!r}"
+    if label.source not in LABEL_SOURCES:
+        return f"invalid source {label.source!r}"
+    if not isinstance(label.reason, str) or not label.reason.strip():
+        return "invalid reason"
+    return label_provenance_error(label.source, label.flag_reason, label.model)
+
+
 def parse_adjudicated_label_record(
     record: object, location: str
 ) -> AdjudicatedLabel:
@@ -471,49 +492,25 @@ def parse_adjudicated_label_record(
 
     Shared by the label reader and by stages whose records embed the final
     label alongside their own fields, so the label contract is validated in
-    one place. A ``heuristic`` record must not carry labeler fields; a
-    ``labeler`` record must carry both the flag it resolved and the model
-    that produced it.
+    one place: the mapping is decoded into an `AdjudicatedLabel` and checked
+    with :func:`adjudicated_label_error`.
     """
     if not isinstance(record, dict):
         raise AdjudicationError(
             f"malformed adjudicated label on {location}: expected an object"
         )
-    interaction_id = record.get("interaction_id")
-    if type(interaction_id) is not int:
-        raise AdjudicationError(
-            f"malformed adjudicated label on {location}: invalid interaction_id"
-        )
-    label = record.get("label")
-    if label not in closure.CLOSURE_LABELS:
-        raise AdjudicationError(
-            f"malformed adjudicated label on {location}: invalid label {label!r}"
-        )
-    source = record.get("source")
-    if source not in LABEL_SOURCES:
-        raise AdjudicationError(
-            f"malformed adjudicated label on {location}: invalid source {source!r}"
-        )
-    reason = record.get("reason")
-    if not isinstance(reason, str) or not reason.strip():
-        raise AdjudicationError(
-            f"malformed adjudicated label on {location}: invalid reason"
-        )
-    flag_reason = record.get("flag_reason")
-    model = record.get("model")
-    provenance_error = label_provenance_error(source, flag_reason, model)
-    if provenance_error is not None:
-        raise AdjudicationError(
-            f"malformed adjudicated label on {location}: {provenance_error}"
-        )
-    return AdjudicatedLabel(
-        interaction_id=interaction_id,
-        label=label,
-        source=source,
-        reason=reason,
-        flag_reason=flag_reason,
-        model=model,
+    label = AdjudicatedLabel(
+        interaction_id=record.get("interaction_id"),
+        label=record.get("label"),
+        source=record.get("source"),
+        reason=record.get("reason"),
+        flag_reason=record.get("flag_reason"),
+        model=record.get("model"),
     )
+    error = adjudicated_label_error(label)
+    if error is not None:
+        raise AdjudicationError(f"malformed adjudicated label on {location}: {error}")
+    return label
 
 
 def _index_labels(
