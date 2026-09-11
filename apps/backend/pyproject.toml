@@ -8,6 +8,9 @@ dependencies = [
     "openai>=1.40",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
+    "fastembed>=0.4",
+    "numpy>=2.0",
+    "scikit-learn>=1.5",
 ]
 
 [project.optional-dependencies]

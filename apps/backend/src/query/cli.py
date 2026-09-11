@@ -9,12 +9,15 @@ from query import (
     adjudication,
     closure,
     config,
+    discovery,
+    embedding,
     english,
     interactions,
     llm,
     resolution,
     sampling,
     source,
+    taxonomy,
 )
 
 
@@ -236,6 +239,78 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write the resolution report as JSON",
+    )
+
+    discover_parser = sub.add_parser(
+        "discover-intents",
+        help="cluster RAG-pool Customer Messages and map each cluster to the seed taxonomy",
+    )
+    discover_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=discovery.DEFAULT_INPUT_PATH,
+        help=f"Interactions JSONL path (default: {discovery.DEFAULT_INPUT_PATH})",
+    )
+    discover_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_SEED_TAXONOMY_PATH,
+        help=f"seed taxonomy Markdown path (default: {taxonomy.DEFAULT_SEED_TAXONOMY_PATH})",
+    )
+    discover_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the clusters as JSON Lines (e.g. {discovery.DEFAULT_CLUSTERS_PATH})",
+    )
+    discover_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the discovery report as JSON",
+    )
+    discover_parser.add_argument(
+        "--review",
+        type=Path,
+        default=None,
+        help=f"optional path to write the Markdown review (e.g. {discovery.DEFAULT_REVIEW_PATH})",
+    )
+    discover_parser.add_argument(
+        "--clusters",
+        type=int,
+        default=discovery.DEFAULT_CLUSTERS,
+        help=f"number of KMeans clusters (default: {discovery.DEFAULT_CLUSTERS})",
+    )
+    discover_parser.add_argument(
+        "--seed",
+        type=int,
+        default=discovery.DEFAULT_SEED,
+        help=f"KMeans random seed (default: {discovery.DEFAULT_SEED})",
+    )
+    discover_parser.add_argument(
+        "--examples",
+        type=int,
+        default=discovery.DEFAULT_EXAMPLES,
+        help=f"example messages per cluster (default: {discovery.DEFAULT_EXAMPLES})",
+    )
+    discover_parser.add_argument(
+        "--candidates",
+        type=int,
+        default=discovery.DEFAULT_CANDIDATES,
+        help=f"candidate seed intents per cluster (default: {discovery.DEFAULT_CANDIDATES})",
+    )
+    discover_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+    discover_parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="optional JSONL cache of mapping verdicts; matching entries are reused until the file is deleted",
     )
 
     args = parser.parse_args(argv)
@@ -620,6 +695,120 @@ def main(argv: list[str] | None = None) -> int:
             print(f"report written: {args.report}")
         if args.out:
             print(f"dataset written: {args.out}")
+        return 0
+
+    if args.command == "discover-intents":
+        problem = _output_paths_error(
+            args.input,
+            args.taxonomy,
+            args.out,
+            args.report,
+            args.review,
+            args.cache,
+            message="paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            seeds = taxonomy.read_seed_taxonomy(args.taxonomy)
+            cache = discovery.DiscoveryCache(args.cache) if args.cache else None
+            clusters, report = discovery.discover_intents(
+                found,
+                seeds,
+                embedding.MiniLMEmbedder(),
+                clusters=args.clusters,
+                seed=args.seed,
+                examples=args.examples,
+                candidates=args.candidates,
+                workers=args.workers,
+                cache=cache,
+            )
+            if args.out:
+                staged.append(
+                    (
+                        args.out,
+                        discovery.stage_intent_clusters_jsonl(clusters, args.out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "clusters": report.clusters,
+                    "messages": report.messages,
+                    "requested_clusters": report.requested_clusters,
+                    "seed": report.seed,
+                    "embedding_model": report.embedding_model,
+                    "mapped_clusters": report.mapped_clusters,
+                    "new_clusters": report.new_clusters,
+                    "junk_clusters": report.junk_clusters,
+                    "mapped_messages": report.mapped_messages,
+                    "new_messages": report.new_messages,
+                    "junk_messages": report.junk_messages,
+                    "mapped_share": report.mapped_share,
+                    "per_intent": {
+                        intent_id: {
+                            "clusters": counts.clusters,
+                            "messages": counts.messages,
+                        }
+                        for intent_id, counts in report.per_intent.items()
+                    },
+                    "absent_intents": list(report.absent_intents),
+                    "models": list(report.models),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            if args.review:
+                staged.append(
+                    (
+                        args.review,
+                        discovery.stage_review_markdown(
+                            clusters, report, seeds, args.review
+                        ),
+                    )
+                )
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            embedding.EmbeddingError,
+            discovery.DiscoveryError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.messages} interactions)",
+            (
+                f"clusters: {report.clusters} "
+                f"(k={report.requested_clusters}, seed={report.seed})"
+            ),
+            (
+                f"mapped: {report.mapped_clusters} clusters, "
+                f"{report.mapped_messages} messages ({report.mapped_share:.2%})"
+            ),
+            f"new: {report.new_clusters} clusters, {report.new_messages} messages",
+            f"junk: {report.junk_clusters} clusters, {report.junk_messages} messages",
+        ]
+        if report.absent_intents:
+            lines.append(
+                "seed intents with no mapped cluster: "
+                + ", ".join(report.absent_intents)
+            )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"clusters written: {args.out}")
+        if args.review:
+            print(f"review written: {args.review}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")

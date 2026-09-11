@@ -100,6 +100,16 @@ uv run --package query query build-resolution-dataset --in data/rag-pool.jsonl -
 
 Each line is one Interaction's full record: `{interaction_id, dataset_version, label, retrieval_eligible, source, reason, flag_reason, model, customer_id, brand_id, turns}`. `retrieval_eligible` is derived from the label, so it is true only for Resolved Cases; Uncertain and Unresolved records stay in the dataset as evaluation negatives (ADR-0001's decision 4). The recorded snapshot holds all 3,000 RAG-pool Interactions with 215 retrieval-eligible (190 heuristic, 25 labeler); the report counts each category and the heuristic vs labeler split. The build fails if the labels do not cover the input exactly. `--in` and `--labels` default to the RAG pool and final labels; `--out` and `--report` are optional and must not collide with the inputs or each other.
 
+## Discover intents from the data
+
+Cluster the RAG pool's opening Customer Messages and reconcile each cluster against the seed taxonomy with a labeler verdict (see `docs/adr/0009-intent-discovery.md`):
+
+```sh
+uv run --package query query discover-intents --in data/rag-pool.jsonl --out data/intent-clusters.jsonl --report data/intent-discovery-report.json --review docs/intent-discovery.md --clusters 30 --workers 8 --cache data/intent-discovery-cache.jsonl
+```
+
+Every opening message is embedded locally with all-MiniLM-L6-v2 (ONNX via fastembed; the ~90 MB model downloads once, then works offline) and clustered with seeded KMeans. Each cluster carries embedding-similarity candidate seeds, the examples closest to its centroid, and one labeler verdict with a one-line justification: a seed intent id, `new` for a coherent support theme the seed misses, or `junk` for non-support messages. The recorded snapshot puts all 3,000 messages in 30 clusters — 26 mapped (2,501 messages), 1 new (23, concert presale codes), 3 junk (476) — with `account_admin` and `devices_connectivity` unmapped; `docs/intent-discovery.md` is the review artifact with examples per cluster and feeds ticket 11's final taxonomy. `--workers` bounds concurrent labeler calls and `--cache` records each verdict so an interrupted run resumes; the labeler is non-deterministic, so the review is one snapshot. `--in` defaults to the RAG pool, `--taxonomy` to the seed document, and `--clusters`, `--seed`, `--examples`, and `--candidates` tune the run; all paths must be distinct.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
