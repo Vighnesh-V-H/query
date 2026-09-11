@@ -12,6 +12,7 @@ from query import (
     english,
     interactions,
     llm,
+    resolution,
     sampling,
     source,
 )
@@ -205,6 +206,36 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional JSONL cache of labeler verdicts; matching entries are reused until the file is deleted",
+    )
+
+    resolution_parser = sub.add_parser(
+        "build-resolution-dataset",
+        help="join final labels onto the RAG pool and mark Resolved Cases retrieval-eligible",
+    )
+    resolution_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=resolution.DEFAULT_INTERACTIONS_PATH,
+        help=f"Interactions JSONL path (default: {resolution.DEFAULT_INTERACTIONS_PATH})",
+    )
+    resolution_parser.add_argument(
+        "--labels",
+        type=Path,
+        default=resolution.DEFAULT_LABELS_PATH,
+        help=f"final closure labels JSONL path (default: {resolution.DEFAULT_LABELS_PATH})",
+    )
+    resolution_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the resolution dataset as JSON Lines (e.g. {resolution.DEFAULT_DATASET_PATH})",
+    )
+    resolution_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the resolution report as JSON",
     )
 
     args = parser.parse_args(argv)
@@ -520,6 +551,83 @@ def main(argv: list[str] | None = None) -> int:
             print(f"report written: {args.report}")
         if args.out:
             print(f"labels written: {args.out}")
+        return 0
+
+    if args.command == "build-resolution-dataset":
+        problem = _output_paths_error(args.input, args.labels, args.out, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            labels = adjudication.read_adjudicated_labels_jsonl(args.labels)
+            records, report = resolution.build_resolution_dataset(found, labels)
+            if args.out:
+                staged.append(
+                    (
+                        args.out,
+                        resolution.stage_resolution_dataset_jsonl(records, args.out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "dataset_version": report.dataset_version,
+                    "total": report.total,
+                    "resolved": report.resolved,
+                    "uncertain": report.uncertain,
+                    "unresolved": report.unresolved,
+                    "retrieval_eligible": report.retrieval_eligible,
+                    "retrieval_share": report.retrieval_share,
+                    "by_source": {
+                        "heuristic": {
+                            "total": report.heuristic.total,
+                            "resolved": report.heuristic.resolved,
+                            "uncertain": report.heuristic.uncertain,
+                            "unresolved": report.heuristic.unresolved,
+                        },
+                        "labeler": {
+                            "total": report.labeler.total,
+                            "resolved": report.labeler.resolved,
+                            "uncertain": report.labeler.uncertain,
+                            "unresolved": report.labeler.unresolved,
+                        },
+                    },
+                    "models": list(report.models),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            adjudication.AdjudicationError,
+            resolution.ResolutionDatasetError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.total} interactions)",
+            f"labels: {args.labels} ({report.total} labeled)",
+            f"resolved: {report.resolved}",
+            f"uncertain: {report.uncertain}",
+            f"unresolved: {report.unresolved}",
+            (
+                f"retrieval-eligible: {report.retrieval_eligible} "
+                f"({report.retrieval_share:.2%})"
+            ),
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"dataset written: {args.out}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")

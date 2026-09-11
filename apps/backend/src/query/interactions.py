@@ -343,6 +343,16 @@ def _parse_interaction_line(line: str, location: str) -> Interaction:
         record = json.loads(line)
     except json.JSONDecodeError as exc:
         raise InteractionsError(f"malformed JSON on {location}: {exc}") from exc
+    return parse_interaction_record(record, location)
+
+
+def parse_interaction_record(record: object, location: str) -> Interaction:
+    """Validate one decoded Interaction mapping and build the Interaction.
+
+    Shared by the Interaction reader and by stages whose records embed an
+    Interaction alongside their own fields, so the content contract is
+    validated in one place.
+    """
     if not isinstance(record, dict):
         raise InteractionsError(f"malformed Interaction on {location}: expected an object")
     interaction_id = record.get("interaction_id")

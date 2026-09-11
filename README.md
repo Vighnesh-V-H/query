@@ -90,6 +90,16 @@ uv run --package query query adjudicate-closures --in data/rag-pool.jsonl --labe
 
 Each output line is one Interaction's final `{interaction_id, label, source, reason, flag_reason, model}`: flagged cases get a labeler verdict with a one-line justification, everything else keeps its heuristic label. The recorded snapshot labels all 3,000 RAG-pool Interactions — 215 Resolved, 2,569 Uncertain, 216 Unresolved — recovering 25 Resolved and 29 Unresolved from the 1,306 flagged cases. The labeler is the only non-deterministic stage, so rerunning can move the ambiguous middle. `--workers` bounds concurrent calls and `--cache` records each verdict as it completes so an interrupted run resumes without re-calling; `--in` and `--labels` default to the RAG pool and heuristic labels, and all paths must be distinct.
 
+## Build the resolution dataset
+
+Join the final closure labels back onto the RAG pool and flag only Resolved Cases as retrieval-eligible Historical Cases (see `docs/adr/0008-resolution-dataset.md`):
+
+```sh
+uv run --package query query build-resolution-dataset --in data/rag-pool.jsonl --labels data/closure-labels-final.jsonl --out data/resolution-dataset.jsonl --report data/resolution-report.json
+```
+
+Each line is one Interaction's full record: `{interaction_id, dataset_version, label, retrieval_eligible, source, reason, flag_reason, model, customer_id, brand_id, turns}`. `retrieval_eligible` is derived from the label, so it is true only for Resolved Cases; Uncertain and Unresolved records stay in the dataset as evaluation negatives (ADR-0001's decision 4). The recorded snapshot holds all 3,000 RAG-pool Interactions with 215 retrieval-eligible (190 heuristic, 25 labeler); the report counts each category and the heuristic vs labeler split. The build fails if the labels do not cover the input exactly. `--in` and `--labels` default to the RAG pool and final labels; `--out` and `--report` are optional and must not collide with the inputs or each other.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.

@@ -47,6 +47,9 @@ from query import closure, llm
 
 DEFAULT_INTERACTIONS_PATH = closure.DEFAULT_INPUT_PATH
 DEFAULT_LABELS_PATH = closure.DEFAULT_LABELS_PATH
+DEFAULT_ADJUDICATED_LABELS_PATH = closure.REPO_ROOT / "data" / "closure-labels-final.jsonl"
+
+LABEL_SOURCES = ("heuristic", "labeler")
 
 SYSTEM_PROMPT = (
     "You are a precise annotation assistant for customer-support research. "
@@ -400,6 +403,107 @@ def stage_adjudicated_labels_jsonl(
             pass
         raise
     return Path(temporary_name)
+
+
+def read_adjudicated_labels_jsonl(
+    input_path: Path | str = DEFAULT_ADJUDICATED_LABELS_PATH,
+) -> tuple[AdjudicatedLabel, ...]:
+    """Read final closure labels back from the JSON Lines format written above.
+
+    Inverse of :func:`stage_adjudicated_labels_jsonl`: parses every record and
+    validates its structure and unique interaction ids, so downstream stages
+    never see a malformed label file. Every record must carry a final label;
+    ``source`` selects which of ``flag_reason`` and ``model`` are required.
+    Returns the labels in file order.
+    """
+    input_path = Path(input_path)
+    if not input_path.is_file():
+        raise AdjudicationError(f"adjudicated labels JSONL does not exist: {input_path}")
+    labels = []
+    seen_ids: set[int] = set()
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            location = f"line {line_number} of {input_path}"
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise AdjudicationError(
+                    f"malformed JSON on {location}: {exc}"
+                ) from exc
+            label = parse_adjudicated_label_record(record, location)
+            if label.interaction_id in seen_ids:
+                raise AdjudicationError(
+                    f"duplicate interaction_id {label.interaction_id} on {location}"
+                )
+            seen_ids.add(label.interaction_id)
+            labels.append(label)
+    return tuple(labels)
+
+
+def parse_adjudicated_label_record(
+    record: object, location: str
+) -> AdjudicatedLabel:
+    """Validate one decoded final-label mapping and build the AdjudicatedLabel.
+
+    Shared by the label reader and by stages whose records embed the final
+    label alongside their own fields, so the label contract is validated in
+    one place. A ``heuristic`` record must not carry labeler fields; a
+    ``labeler`` record must carry both the flag it resolved and the model
+    that produced it.
+    """
+    if not isinstance(record, dict):
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: expected an object"
+        )
+    interaction_id = record.get("interaction_id")
+    if type(interaction_id) is not int:
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: invalid interaction_id"
+        )
+    label = record.get("label")
+    if label not in closure.CLOSURE_LABELS:
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: invalid label {label!r}"
+        )
+    source = record.get("source")
+    if source not in LABEL_SOURCES:
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: invalid source {source!r}"
+        )
+    reason = record.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise AdjudicationError(
+            f"malformed adjudicated label on {location}: invalid reason"
+        )
+    flag_reason = record.get("flag_reason")
+    model = record.get("model")
+    if source == "heuristic":
+        if flag_reason is not None or model is not None:
+            raise AdjudicationError(
+                f"malformed adjudicated label on {location}: heuristic labels "
+                "carry no flag_reason or model"
+            )
+    else:
+        if not isinstance(flag_reason, str) or not flag_reason:
+            raise AdjudicationError(
+                f"malformed adjudicated label on {location}: labeler labels "
+                "need a flag_reason"
+            )
+        if not isinstance(model, str) or not model:
+            raise AdjudicationError(
+                f"malformed adjudicated label on {location}: labeler labels "
+                "need a model"
+            )
+    return AdjudicatedLabel(
+        interaction_id=interaction_id,
+        label=label,
+        source=source,
+        reason=reason,
+        flag_reason=flag_reason,
+        model=model,
+    )
 
 
 def _index_labels(
