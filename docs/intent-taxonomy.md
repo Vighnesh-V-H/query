@@ -24,7 +24,7 @@ The taxonomy holds **12 support intents plus an `other` fallback**, inside the 8
 | 12 | `presale_codes` | Artist presale codes: requests for a code, codes that never arrived, and how Spotify presale access works. | promoted from discovery cluster 1 |
 | 13 | `other` | Fallback class for messages that fit no support intent: praise, jokes, bare mentions, support-channel chatter, and other non-actionable noise. | seed, fallback |
 
-## Representative messages
+## Representative examples
 
 Two verbatim opening Customer Messages per intent, drawn from the recorded discovery clusters (interaction id in brackets); `other` draws on the junk clusters and the seed document.
 

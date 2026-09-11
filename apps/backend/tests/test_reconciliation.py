@@ -75,8 +75,8 @@ def _base_clusters():
     return [
         _cluster(0, 10, "playback"),
         _cluster(1, 5, "account_access"),
-        _cluster(2, 4, "new"),
-        _cluster(3, 6, "junk"),
+        _cluster(2, 4, discovery.MAPPING_NEW),
+        _cluster(3, 6, discovery.MAPPING_JUNK),
     ]
 
 
@@ -96,6 +96,22 @@ def test_routes_every_cluster_through_the_recorded_decisions():
     )
     assert report.covered_messages == 19
     assert report.covered_share == pytest.approx(19 / 25)
+
+
+def test_taxonomy_without_other_fallback_raises():
+    seeds = [_seed("playback")]
+    final = _final(
+        "playback",
+        seed_decisions=[
+            taxonomy.SeedDecision("playback", taxonomy.KEPT, "playback"),
+        ],
+    )
+    clusters = [_cluster(0, 3, "playback"), _cluster(1, 2, "junk")]
+
+    with pytest.raises(
+        reconciliation.ReconciliationError, match="no 'other' fallback"
+    ):
+        reconciliation.reconcile_intents(clusters, seeds, final)
 
 
 def test_dropped_new_theme_routes_to_other():

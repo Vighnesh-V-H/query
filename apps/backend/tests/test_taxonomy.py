@@ -188,7 +188,7 @@ def _final_document(
     ]
     for number, (intent_id, definition) in enumerate(intents, 1):
         lines.append(f"| {number} | `{intent_id}` | {definition} | seed |")
-    lines.extend(["", "## Representative messages", ""])
+    lines.extend(["", "## Representative examples", ""])
     for intent_id, message in examples or []:
         lines.append(f"- `{intent_id}` [123]: {message}")
     lines.extend(
@@ -409,6 +409,16 @@ def test_final_taxonomy_rejects_merged_decision_with_unknown_target(tmp_path):
         taxonomy.read_final_taxonomy(_write(tmp_path, document))
 
 
+def test_final_taxonomy_rejects_invalid_seed_decision(tmp_path):
+    document = _valid_final_document().replace(
+        "| `alpha` | merged | `beta` | evidence |",
+        "| `alpha` | renamed | `beta` | evidence |",
+    )
+
+    with pytest.raises(taxonomy.TaxonomyError, match="invalid seed decision"):
+        taxonomy.read_final_taxonomy(_write(tmp_path, document))
+
+
 def test_final_taxonomy_rejects_dropped_decision_with_target(tmp_path):
     document = _valid_final_document().replace(
         "| `alpha` | merged | `beta` | evidence |",
@@ -438,6 +448,16 @@ def test_final_taxonomy_rejects_unknown_new_theme_target(tmp_path):
     )
 
     with pytest.raises(taxonomy.TaxonomyError, match="unknown intent 'omega'"):
+        taxonomy.read_final_taxonomy(_write(tmp_path, document))
+
+
+def test_final_taxonomy_rejects_promoted_theme_without_target(tmp_path):
+    document = _valid_final_document().replace(
+        "| 3 | promoted | `gamma` | evidence |",
+        "| 3 | promoted | - | evidence |",
+    )
+
+    with pytest.raises(taxonomy.TaxonomyError, match="needs a final intent"):
         taxonomy.read_final_taxonomy(_write(tmp_path, document))
 
 

@@ -20,7 +20,7 @@ absorbed.
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -51,7 +51,7 @@ _TABLE_ROW = re.compile(r"^\|\s*\d+\s*\|")
 _REPRESENTATIVE = re.compile(r"^-\s+`([^`]+)`\s+\[\d+\]:\s+(.+)$")
 _FINAL_VERSION = re.compile(r"^\*\*Version:\*\*\s+(\d+)\s*$")
 _FINAL_INTENT_HEADER = "| # | Intent id | Definition | Origin |"
-_FINAL_EXAMPLE_HEADER = "## Representative messages"
+_FINAL_EXAMPLE_HEADER = "## Representative examples"
 _SEED_DECISION_HEADER = "| Seed intent | Decision | Final intent | Evidence |"
 _NEW_THEME_HEADER = "| Cluster | Decision | Final intent | Evidence |"
 
@@ -133,13 +133,7 @@ def _read_table_row(line: str, location: str, definitions: dict[str, str]) -> No
             f"malformed taxonomy row on {location}: expected 4 columns, got {len(cells)}"
         )
     id_cell = cells[1]
-    intent_id = id_cell.removeprefix("`").removesuffix("`")
-    if not (
-        id_cell.startswith("`")
-        and id_cell.endswith("`")
-        and _INTENT_ID.match(intent_id)
-    ):
-        raise TaxonomyError(f"invalid intent id on {location}: {id_cell!r}")
+    intent_id = _backticked_id(id_cell, location)
     if intent_id in definitions:
         raise TaxonomyError(f"duplicate intent id {intent_id!r} on {location}")
     definition = cells[2]
@@ -191,6 +185,50 @@ class FinalTaxonomy:
     def intent_ids(self) -> tuple[str, ...]:
         """The intent ids, in document order."""
         return tuple(intent.intent_id for intent in self.intents)
+
+
+def seed_decision_error(
+    decision: SeedDecision, intent_ids: Collection[str]
+) -> str | None:
+    """Check one seed decision against the reconciliation contract.
+
+    Shared by the document reader and the reconciliation checker, like the
+    discovery cluster contract, so the two cannot disagree about what a valid
+    decision is. Returns ``None`` when the decision is valid, or a short
+    description of the problem.
+    """
+    if decision.decision not in SEED_DECISIONS:
+        return f"invalid seed decision {decision.decision!r}"
+    if decision.decision == DROPPED:
+        if decision.final_intent is not None:
+            return "dropped seed intent must have no final intent"
+        return None
+    if decision.final_intent is None:
+        return f"{decision.decision} seed intent needs a final intent"
+    if decision.final_intent not in intent_ids:
+        return f"unknown intent {decision.final_intent!r}"
+    if decision.decision == KEPT and decision.final_intent != decision.seed_intent:
+        return "kept seed intent must keep its id"
+    if decision.decision == MERGED and decision.final_intent == decision.seed_intent:
+        return "merged seed intent must point at another intent"
+    return None
+
+
+def new_theme_decision_error(
+    decision: NewThemeDecision, intent_ids: Collection[str]
+) -> str | None:
+    """Check one discovered-theme decision, shared like :func:`seed_decision_error`."""
+    if decision.decision not in NEW_THEME_DECISIONS:
+        return f"invalid new-theme decision {decision.decision!r}"
+    if decision.decision == DROPPED:
+        if decision.final_intent is not None:
+            return "dropped theme must have no final intent"
+        return None
+    if decision.final_intent is None:
+        return f"{decision.decision} theme needs a final intent"
+    if decision.final_intent not in intent_ids:
+        return f"unknown intent {decision.final_intent!r}"
+    return None
 
 
 def read_final_taxonomy(
@@ -356,30 +394,20 @@ def _read_seed_decisions(
             raise TaxonomyError(
                 f"duplicate seed decision for {seed_intent!r} on {location}"
             )
-        decision, target = _seed_decision(
-            cells[1], cells[2], intent_ids, location
-        )
         if not cells[3]:
             raise TaxonomyError(
                 f"seed decision for {seed_intent!r} has no evidence on {location}"
             )
-        if decision == KEPT and target != seed_intent:
-            raise TaxonomyError(
-                f"kept seed intent {seed_intent!r} must keep its id on {location}"
-            )
-        if decision == MERGED and target == seed_intent:
-            raise TaxonomyError(
-                f"merged seed intent {seed_intent!r} must point at another "
-                f"intent on {location}"
-            )
-        seen.add(seed_intent)
-        decisions.append(
-            SeedDecision(
-                seed_intent=seed_intent,
-                decision=decision,
-                final_intent=target,
-            )
+        decision = SeedDecision(
+            seed_intent=seed_intent,
+            decision=cells[1],
+            final_intent=_decision_target(cells[2], location),
         )
+        error = seed_decision_error(decision, intent_ids)
+        if error is not None:
+            raise TaxonomyError(f"{error} on {location}")
+        seen.add(seed_intent)
+        decisions.append(decision)
     return tuple(decisions)
 
 
@@ -405,32 +433,21 @@ def _read_new_theme_decisions(
             raise TaxonomyError(
                 f"duplicate new-theme decision for cluster {cluster_id} on {location}"
             )
-        if cells[1] not in NEW_THEME_DECISIONS:
-            raise TaxonomyError(
-                f"invalid new-theme decision {cells[1]!r} on {location}"
-            )
         if not cells[3]:
             raise TaxonomyError(
                 f"new-theme decision for cluster {cluster_id} has no evidence "
                 f"on {location}"
             )
-        target = _decision_target(cells[2], location)
-        if cells[1] == PROMOTED and target not in intent_ids:
-            raise TaxonomyError(
-                f"promoted theme on {location} references unknown intent {target!r}"
-            )
-        if cells[1] == DROPPED and target is not None:
-            raise TaxonomyError(
-                f"dropped theme on {location} must have no final intent"
-            )
-        seen.add(cluster_id)
-        decisions.append(
-            NewThemeDecision(
-                cluster_id=cluster_id,
-                decision=cells[1],
-                final_intent=target,
-            )
+        decision = NewThemeDecision(
+            cluster_id=cluster_id,
+            decision=cells[1],
+            final_intent=_decision_target(cells[2], location),
         )
+        error = new_theme_decision_error(decision, intent_ids)
+        if error is not None:
+            raise TaxonomyError(f"{error} on {location}")
+        seen.add(cluster_id)
+        decisions.append(decision)
     return tuple(decisions)
 
 
@@ -476,30 +493,6 @@ def _backticked_id(cell: str, location: str) -> str:
     ):
         raise TaxonomyError(f"invalid intent id on {location}: {cell!r}")
     return candidate
-
-
-def _seed_decision(
-    decision: str, target_cell: str, intent_ids: tuple[str, ...], location: str
-) -> tuple[str, str | None]:
-    """Validate one seed decision value and its target."""
-    if decision not in SEED_DECISIONS:
-        raise TaxonomyError(f"invalid seed decision {decision!r} on {location}")
-    target = _decision_target(target_cell, location)
-    if decision == DROPPED:
-        if target is not None:
-            raise TaxonomyError(
-                f"dropped seed intent must have no final intent on {location}"
-            )
-        return decision, target
-    if target is None:
-        raise TaxonomyError(
-            f"{decision} seed intent needs a final intent on {location}"
-        )
-    if target not in intent_ids:
-        raise TaxonomyError(
-            f"seed decision on {location} references unknown intent {target!r}"
-        )
-    return decision, target
 
 
 def _decision_target(cell: str, location: str) -> str | None:

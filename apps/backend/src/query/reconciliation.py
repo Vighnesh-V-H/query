@@ -74,6 +74,10 @@ def reconcile_intents(
     at an intent the taxonomy does not define.
     """
     intent_ids = set(final.intent_ids)
+    if taxonomy.OTHER_INTENT_ID not in intent_ids:
+        raise ReconciliationError(
+            "final taxonomy has no 'other' fallback for non-support clusters"
+        )
     decisions = _seed_decisions_by_id(seeds, final, intent_ids)
     new_decisions = _new_theme_decisions_by_cluster(clusters, final, intent_ids)
     coverage = {
@@ -122,49 +126,12 @@ def _seed_decisions_by_id(
             f"decision for unknown seed intent {unknown[0]!r}"
         )
     for decision in by_id.values():
-        _check_seed_decision(decision, intent_ids)
-    return by_id
-
-
-def _check_seed_decision(
-    decision: taxonomy.SeedDecision, intent_ids: set[str]
-) -> None:
-    """Check one seed decision's value, target, and id rules."""
-    if decision.decision not in taxonomy.SEED_DECISIONS:
-        raise ReconciliationError(
-            f"invalid decision {decision.decision!r} for seed intent "
-            f"{decision.seed_intent!r}"
-        )
-    if decision.decision == taxonomy.DROPPED:
-        if decision.final_intent is not None:
+        error = taxonomy.seed_decision_error(decision, intent_ids)
+        if error is not None:
             raise ReconciliationError(
-                f"dropped seed intent {decision.seed_intent!r} must not point "
-                f"at an intent"
+                f"seed decision for {decision.seed_intent!r}: {error}"
             )
-        return
-    if decision.final_intent is None:
-        raise ReconciliationError(
-            f"{decision.decision} seed intent {decision.seed_intent!r} needs "
-            f"a final intent"
-        )
-    if decision.final_intent not in intent_ids:
-        raise ReconciliationError(
-            f"seed decision for {decision.seed_intent!r} points at unknown "
-            f"intent {decision.final_intent!r}"
-        )
-    if decision.decision == taxonomy.KEPT and (
-        decision.final_intent != decision.seed_intent
-    ):
-        raise ReconciliationError(
-            f"kept seed intent {decision.seed_intent!r} must keep its id"
-        )
-    if decision.decision == taxonomy.MERGED and (
-        decision.final_intent == decision.seed_intent
-    ):
-        raise ReconciliationError(
-            f"merged seed intent {decision.seed_intent!r} must point at "
-            f"another intent"
-        )
+    return by_id
 
 
 def _new_theme_decisions_by_cluster(
@@ -197,22 +164,10 @@ def _new_theme_decisions_by_cluster(
             f"not flag new"
         )
     for decision in by_id.values():
-        if decision.decision == taxonomy.PROMOTED:
-            if decision.final_intent not in intent_ids:
-                raise ReconciliationError(
-                    f"promoted cluster {decision.cluster_id} points at unknown "
-                    f"intent {decision.final_intent!r}"
-                )
-        elif decision.decision == taxonomy.DROPPED:
-            if decision.final_intent is not None:
-                raise ReconciliationError(
-                    f"dropped cluster {decision.cluster_id} must not point at "
-                    f"an intent"
-                )
-        else:
+        error = taxonomy.new_theme_decision_error(decision, intent_ids)
+        if error is not None:
             raise ReconciliationError(
-                f"invalid new-theme decision {decision.decision!r} for cluster "
-                f"{decision.cluster_id}"
+                f"new-theme decision for cluster {decision.cluster_id}: {error}"
             )
     return by_id
 
