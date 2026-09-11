@@ -1,9 +1,12 @@
+import hashlib
 import json
 from dataclasses import dataclass
 
 from openai import OpenAI
 
 from query import config
+
+MAX_REPLY_EXCERPT = 500
 
 
 @dataclass
@@ -62,3 +65,17 @@ def extract_json_object(content: str) -> dict | None:
         if isinstance(payload, dict):
             return payload
     return None
+
+
+def build_repair_prompt(prompt: str, previous_reply: str) -> str:
+    """Ask again after a reply that was not valid JSON with the required fields."""
+    excerpt = previous_reply.strip()[:MAX_REPLY_EXCERPT]
+    return (
+        f"{prompt}\n\nYour previous reply was not valid JSON with the required "
+        f"fields:\n{excerpt}\n\nReply with raw JSON only."
+    )
+
+
+def prompt_sha256(system: str, prompt: str) -> str:
+    """Hash exactly what decides a verdict, so stale cache entries miss."""
+    return hashlib.sha256(f"{system}\n\n{prompt}".encode()).hexdigest()

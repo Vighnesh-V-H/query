@@ -32,7 +32,6 @@ cache file when changing the labeler model or prompt and fresh verdicts are
 wanted.
 """
 
-import hashlib
 import json
 import os
 import tempfile
@@ -64,7 +63,6 @@ TAXONOMY = (
     "- unresolved: the customer keeps asking, or the brand indicated it could "
     "not help."
 )
-MAX_REPLY_EXCERPT = 500
 
 
 class AdjudicationError(Exception):
@@ -244,15 +242,6 @@ def build_prompt(interaction: closure.Interaction, flag_reason: str) -> str:
         "Reply with raw JSON only, no markdown and no prose:\n"
         '{"label": "resolved" | "uncertain" | "unresolved", '
         '"justification": "one sentence naming the decisive evidence"}'
-    )
-
-
-def build_repair_prompt(prompt: str, previous_reply: str) -> str:
-    """Ask again after a reply that was not valid JSON."""
-    excerpt = previous_reply.strip()[:MAX_REPLY_EXCERPT]
-    return (
-        f"{prompt}\n\nYour previous reply was not valid JSON with the required "
-        f"fields:\n{excerpt}\n\nReply with raw JSON only."
     )
 
 
@@ -549,7 +538,7 @@ def _adjudicate_one(
     resume.
     """
     prompt = build_prompt(interaction, flag_reason)
-    cache_key = _prompt_sha256(prompt)
+    cache_key = llm.prompt_sha256(SYSTEM_PROMPT, prompt)
     cached = saved.get(interaction.interaction_id)
     if cached is not None and cached.prompt_sha256 == cache_key:
         return AdjudicatedLabel(
@@ -564,7 +553,7 @@ def _adjudicate_one(
     try:
         label, justification = _parse_reply(interaction.interaction_id, reply.content)
     except AdjudicationError:
-        repair_prompt = build_repair_prompt(prompt, reply.content)
+        repair_prompt = llm.build_repair_prompt(prompt, reply.content)
         reply = _call_labeler(infer, repair_prompt, interaction.interaction_id)
         label, justification = _parse_reply(interaction.interaction_id, reply.content)
     verdict = AdjudicatedLabel(
@@ -589,11 +578,6 @@ def _adjudicate_one(
     return verdict
 
 
-def _prompt_sha256(prompt: str) -> str:
-    """Hash exactly what decides a verdict, so stale cache entries miss."""
-    return hashlib.sha256(f"{SYSTEM_PROMPT}\n\n{prompt}".encode("utf-8")).hexdigest()
-
-
 def _call_labeler(
     infer: Callable[[str], llm.LLMReply], prompt: str, interaction_id: int
 ) -> llm.LLMReply:
@@ -611,7 +595,7 @@ def _parse_reply(interaction_id: int, content: str) -> tuple[closure.Label, str]
     if payload is None:
         raise AdjudicationError(
             f"labeler returned no JSON object for interaction {interaction_id}: "
-            f"{content.strip()[:MAX_REPLY_EXCERPT]!r}"
+            f"{content.strip()[:llm.MAX_REPLY_EXCERPT]!r}"
         )
     label = payload.get("label")
     if label not in closure.CLOSURE_LABELS:

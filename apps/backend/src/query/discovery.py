@@ -23,7 +23,6 @@ a Markdown review with examples per cluster. Clusters are computed over the RAG
 pool only: the holdout stays reserved for the Golden Set.
 """
 
-import hashlib
 import json
 import os
 import tempfile
@@ -51,7 +50,6 @@ MAPPING_NEW = "new"
 MAPPING_JUNK = "junk"
 FLAG_MAPPINGS = (MAPPING_NEW, MAPPING_JUNK)
 SIMILARITY_DECIMALS = 6
-MAX_REPLY_EXCERPT = 500
 
 SYSTEM_PROMPT = (
     "You are a precise taxonomy analyst for customer-support research. "
@@ -191,21 +189,18 @@ def discover_intents(
     matrix = _as_matrix(embedder.embed(messages), len(messages))
     members = _cluster_messages(matrix, clusters, seed)
     infer = infer if infer is not None else call_labeler
-    saved = cache.verdicts() if cache is not None else {}
-    record = cache.record if cache is not None else None
-    mapped, models = _map_clusters(
-        members,
-        interactions,
-        matrix,
-        anchors,
-        support,
-        examples,
-        candidates,
-        infer,
-        saved,
-        record,
-        workers,
+    context = _MappingContext(
+        interactions=interactions,
+        matrix=matrix,
+        anchors=anchors,
+        seed_intents=support,
+        examples=examples,
+        candidates=candidates,
+        infer=infer,
+        saved=cache.verdicts() if cache is not None else {},
+        record=cache.record if cache is not None else None,
     )
+    mapped, models = _map_clusters(members, context, workers)
     return mapped, _report(
         mapped, models, interactions, support, clusters, seed, embedder.model_name
     )
@@ -248,9 +243,9 @@ def build_mapping_prompt(
         '- "junk" when the messages state no issue and no request a support '
         "team would act on: praise, jokes, spam, support-channel chatter, and "
         'bare mentions or one-word replies ("@brand", "help", "How?"). A short '
-        "message that names a problem (\"app keeps crashing\", \"charged "
+        'message that names a problem ("app keeps crashing", "charged '
         'twice") is not junk, and a request about the product (update the app '
-        'for a device, launch in a country, add a feature) is a support issue, '
+        "for a device, launch in a country, add a feature) is a support issue, "
         "not junk. Choose junk only when no example names a problem or request.\n"
         "- one seed intent id above when the messages clearly show that "
         "intent's issue;\n"
@@ -272,15 +267,6 @@ def build_mapping_prompt(
     )
 
 
-def build_repair_prompt(prompt: str, previous_reply: str) -> str:
-    """Ask again after a reply that was not valid JSON."""
-    excerpt = previous_reply.strip()[:MAX_REPLY_EXCERPT]
-    return (
-        f"{prompt}\n\nYour previous reply was not valid JSON with the required "
-        f"fields:\n{excerpt}\n\nReply with raw JSON only."
-    )
-
-
 def parse_mapping_reply(
     cluster_id: int, content: str, intent_ids: Collection[str]
 ) -> tuple[str, str]:
@@ -289,7 +275,7 @@ def parse_mapping_reply(
     if payload is None:
         raise DiscoveryError(
             f"labeler returned no JSON object for cluster {cluster_id}: "
-            f"{content.strip()[:MAX_REPLY_EXCERPT]!r}"
+            f"{content.strip()[: llm.MAX_REPLY_EXCERPT]!r}"
         )
     mapping = payload.get("mapping")
     mapping_error = cluster_mapping_error(mapping, intent_ids)
@@ -658,54 +644,36 @@ def _cluster_messages(
     return tuple(tuple(group) for group in members)
 
 
+@dataclass(frozen=True)
+class _MappingContext:
+    """Everything one cluster mapping needs beyond its member indices."""
+
+    interactions: Sequence[Interaction]
+    matrix: np.ndarray
+    anchors: dict[str, np.ndarray]
+    seed_intents: Sequence[taxonomy.SeedIntent]
+    examples: int
+    candidates: int
+    infer: Callable[[str], llm.LLMReply]
+    saved: dict[int, CachedClusterVerdict]
+    record: Callable[[CachedClusterVerdict], None] | None
+
+
 def _map_clusters(
     members: Sequence[Sequence[int]],
-    interactions: Sequence[Interaction],
-    matrix: np.ndarray,
-    anchors: dict[str, np.ndarray],
-    seed_intents: Sequence[taxonomy.SeedIntent],
-    examples: int,
-    candidates: int,
-    infer: Callable[[str], llm.LLMReply],
-    saved: dict[int, CachedClusterVerdict],
-    record: Callable[[CachedClusterVerdict], None] | None,
+    context: _MappingContext,
     workers: int,
 ) -> tuple[tuple[IntentCluster, ...], tuple[str, ...]]:
     """Map every cluster, preserving cluster order; also return the models used."""
     if workers == 1 or len(members) <= 1:
         results = [
-            _map_cluster(
-                cluster_id,
-                group,
-                interactions,
-                matrix,
-                anchors,
-                seed_intents,
-                examples,
-                candidates,
-                infer,
-                saved,
-                record,
-            )
+            _map_cluster(cluster_id, group, context)
             for cluster_id, group in enumerate(members)
         ]
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(
-                    _map_cluster,
-                    cluster_id,
-                    group,
-                    interactions,
-                    matrix,
-                    anchors,
-                    seed_intents,
-                    examples,
-                    candidates,
-                    infer,
-                    saved,
-                    record,
-                )
+                pool.submit(_map_cluster, cluster_id, group, context)
                 for cluster_id, group in enumerate(members)
             ]
             try:
@@ -725,15 +693,7 @@ def _map_clusters(
 def _map_cluster(
     cluster_id: int,
     member_indices: Sequence[int],
-    interactions: Sequence[Interaction],
-    matrix: np.ndarray,
-    anchors: dict[str, np.ndarray],
-    seed_intents: Sequence[taxonomy.SeedIntent],
-    examples: int,
-    candidates: int,
-    infer: Callable[[str], llm.LLMReply],
-    saved: dict[int, CachedClusterVerdict],
-    record: Callable[[CachedClusterVerdict], None] | None,
+    context: _MappingContext,
 ) -> tuple[IntentCluster, str]:
     """Map one cluster, reusing a matching cached verdict.
 
@@ -741,14 +701,20 @@ def _map_cluster(
     JSON. Fresh verdicts are recorded immediately so an interrupted run can
     resume.
     """
-    exemplars, centroid = _exemplars(matrix, member_indices, interactions, examples)
-    seed_candidates = _candidates(centroid, anchors, candidates)
-    prompt = build_mapping_prompt(
-        cluster_id, len(member_indices), exemplars, seed_candidates, seed_intents
+    exemplars, centroid = _centroid_and_examples(
+        context.matrix, member_indices, context.interactions, context.examples
     )
-    cache_key = _prompt_sha256(prompt)
-    cached = saved.get(cluster_id)
-    intent_ids = tuple(intent.intent_id for intent in seed_intents)
+    seed_candidates = _candidates(centroid, context.anchors, context.candidates)
+    prompt = build_mapping_prompt(
+        cluster_id,
+        len(member_indices),
+        exemplars,
+        seed_candidates,
+        context.seed_intents,
+    )
+    cache_key = llm.prompt_sha256(SYSTEM_PROMPT, prompt)
+    cached = context.saved.get(cluster_id)
+    intent_ids = tuple(intent.intent_id for intent in context.seed_intents)
     if cached is not None and cached.prompt_sha256 == cache_key:
         cluster = IntentCluster(
             cluster_id=cluster_id,
@@ -760,14 +726,14 @@ def _map_cluster(
         )
         model = cached.model
     else:
-        reply = _call_labeler(infer, prompt, cluster_id)
+        reply = _call_labeler(context.infer, prompt, cluster_id)
         try:
             mapping, justification = parse_mapping_reply(
                 cluster_id, reply.content, intent_ids
             )
         except DiscoveryError:
-            repair_prompt = build_repair_prompt(prompt, reply.content)
-            reply = _call_labeler(infer, repair_prompt, cluster_id)
+            repair_prompt = llm.build_repair_prompt(prompt, reply.content)
+            reply = _call_labeler(context.infer, repair_prompt, cluster_id)
             mapping, justification = parse_mapping_reply(
                 cluster_id, reply.content, intent_ids
             )
@@ -780,8 +746,8 @@ def _map_cluster(
             examples=exemplars,
         )
         model = reply.model
-        if record is not None:
-            record(
+        if context.record is not None:
+            context.record(
                 CachedClusterVerdict(
                     cluster_id=cluster_id,
                     prompt_sha256=cache_key,
@@ -796,13 +762,13 @@ def _map_cluster(
     return cluster, model
 
 
-def _exemplars(
+def _centroid_and_examples(
     matrix: np.ndarray,
     member_indices: Sequence[int],
     interactions: Sequence[Interaction],
     examples: int,
 ) -> tuple[tuple[ClusterExample, ...], np.ndarray]:
-    """Pick the examples closest to the cluster centroid, plus the centroid."""
+    """Pick the examples closest to the cluster centroid, and the centroid."""
     members = matrix[list(member_indices)]
     centroid = _normalize_row(members.mean(axis=0))
     similarities = members @ centroid
@@ -813,15 +779,17 @@ def _exemplars(
             interactions[member_indices[position]].interaction_id,
         ),
     )
-    picked = tuple(
-        ClusterExample(
-            interaction_id=interactions[member_indices[position]].interaction_id,
-            message=interactions[member_indices[position]].opening_message.text,
-            similarity=round(float(similarities[position]), SIMILARITY_DECIMALS),
+    picked = []
+    for position in order[:examples]:
+        interaction = interactions[member_indices[position]]
+        picked.append(
+            ClusterExample(
+                interaction_id=interaction.interaction_id,
+                message=interaction.opening_message.text,
+                similarity=round(float(similarities[position]), SIMILARITY_DECIMALS),
+            )
         )
-        for position in order[:examples]
-    )
-    return picked, centroid
+    return tuple(picked), centroid
 
 
 def _candidates(
@@ -1027,8 +995,3 @@ def _call_labeler(
         raise DiscoveryError(
             f"labeler call failed for cluster {cluster_id}: {exc}"
         ) from exc
-
-
-def _prompt_sha256(prompt: str) -> str:
-    """Hash exactly what decides a verdict, so stale cache entries miss."""
-    return hashlib.sha256(f"{SYSTEM_PROMPT}\n\n{prompt}".encode()).hexdigest()

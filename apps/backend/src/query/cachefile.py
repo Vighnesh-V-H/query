@@ -26,10 +26,6 @@ from typing import Generic, TypeVar
 T = TypeVar("T")
 
 
-class CacheFileError(Exception):
-    """Raised when a cache file cannot be parsed or appended."""
-
-
 def read_cache(
     input_path: Path | str,
     parse: Callable[[str, str], T],

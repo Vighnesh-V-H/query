@@ -19,6 +19,6 @@ The stage emits three artifacts from the same records: `data/intent-clusters.jso
 ## Consequences
 
 - The recorded snapshot over all 3,000 RAG-pool messages yields 30 clusters: 26 mapped (2,501 messages), 1 `new` (23 messages, concert presale codes — the first concrete candidate for ticket 11), and 3 `junk` (476 one-word replies and bare mentions). `account_admin` and `devices_connectivity` receive no cluster; that absence is evidence for ticket 11's merge/drop decisions.
-- Clustering is deterministic for a fixed model, seed, and library versions, but the labeler is not: reruns can move a cluster's verdict, and the committed review is one snapshot. Delete the cache to relabel from scratch; prompts embed the seed definitions, so a taxonomy edit invalidates stale verdicts by hash.
+- Clustering is deterministic for a fixed model, seed, and library versions, but the labeler is not: reruns can move a cluster's verdict, and the committed review is one snapshot. The verdict cache pins by prompt hash — delete it to relabel from scratch, including after changing the labeler model, since the hash covers the prompt text, not the model — and prompts embed the seed definitions, so a taxonomy edit invalidates stale verdicts by hash.
 - The first run downloads the model into the user's fastembed cache; later runs, and the whole discovery stage after that, work offline.
 - `apps/backend` gains fastembed, numpy, and scikit-learn; ticket 13's TF-IDF baseline and ticket 16's MiniLM retrieval reuse them.
