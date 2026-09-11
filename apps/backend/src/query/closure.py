@@ -70,6 +70,7 @@ Label = Literal["resolved", "uncertain", "unresolved"]
 class ClosureLabelsError(Exception):
     """Raised when a closure labels JSONL file cannot be read."""
 
+
 REASON_CUSTOMER_CONTINUES = "customer keeps asking after the brand's last reply"
 REASON_CUSTOMER_RESOLVED = "customer's final message acknowledges the issue is resolved"
 REASON_CUSTOMER_DM = "customer moved the conversation to DMs; the outcome is not visible here"

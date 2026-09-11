@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
         "--cache",
         type=Path,
         default=None,
-        help="optional JSONL cache of labeler verdicts, reused to resume interrupted runs",
+        help="optional JSONL cache of labeler verdicts; matching entries are reused until the file is deleted",
     )
 
     args = parser.parse_args(argv)

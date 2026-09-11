@@ -26,8 +26,10 @@ The labeler is the pipeline's only non-deterministic stage: reruns recall the
 model for every flagged Interaction and can move labels. The labeler's replies
 are retried once with a repair prompt when they are not valid JSON. Because the
 calls are slow and paid, an optional append-only cache records each verdict as
-it completes; a resumed run reuses cached verdicts whose prompt hash still
-matches and only calls the labeler for the rest.
+it completes. The cache pins verdicts, so a resumed run reuses any entry whose
+prompt hash still matches instead of calling the labeler again; delete the
+cache file when changing the labeler model or prompt and fresh verdicts are
+wanted.
 """
 
 import hashlib
