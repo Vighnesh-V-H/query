@@ -7,6 +7,7 @@ from pathlib import Path
 
 from query import (
     adjudication,
+    bm25,
     closure,
     config,
     discovery,
@@ -240,6 +241,77 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional path to write the resolution report as JSON",
+    )
+
+    bm25_build_parser = sub.add_parser(
+        "build-bm25-index",
+        help="index Resolved Cases with BM25 and record the build time",
+    )
+    bm25_build_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=bm25.DEFAULT_DATASET_PATH,
+        help=f"resolution dataset JSONL path (default: {bm25.DEFAULT_DATASET_PATH})",
+    )
+    bm25_build_parser.add_argument(
+        "--index-out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the BM25 index as JSON (e.g. {bm25.DEFAULT_INDEX_PATH})",
+    )
+    bm25_build_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the build report as JSON",
+    )
+    bm25_build_parser.add_argument(
+        "--k1",
+        type=float,
+        default=bm25.DEFAULT_K1,
+        help=f"BM25 term-saturation parameter (default: {bm25.DEFAULT_K1})",
+    )
+    bm25_build_parser.add_argument(
+        "--b",
+        type=float,
+        default=bm25.DEFAULT_B,
+        help=f"BM25 length-normalization parameter (default: {bm25.DEFAULT_B})",
+    )
+
+    bm25_retrieve_parser = sub.add_parser(
+        "retrieve-bm25",
+        help="rank Historical Cases for a query with a BM25 index",
+    )
+    bm25_retrieve_parser.add_argument(
+        "--index",
+        type=Path,
+        default=None,
+        help=f"persisted BM25 index JSON path (e.g. {bm25.DEFAULT_INDEX_PATH})",
+    )
+    bm25_retrieve_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=None,
+        help="resolution dataset JSONL path: builds an ephemeral index instead of --index",
+    )
+    bm25_retrieve_parser.add_argument(
+        "--query",
+        required=True,
+        help="customer message to rank Historical Cases against",
+    )
+    bm25_retrieve_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=bm25.DEFAULT_TOP_K,
+        help=f"cases to return (default: {bm25.DEFAULT_TOP_K})",
+    )
+    bm25_retrieve_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the ranked cases as JSON",
     )
 
     discover_parser = sub.add_parser(
@@ -726,6 +798,112 @@ def main(argv: list[str] | None = None) -> int:
             print(f"report written: {args.report}")
         if args.out:
             print(f"dataset written: {args.out}")
+        return 0
+
+    if args.command == "build-bm25-index":
+        problem = _output_paths_error(args.input, args.index_out, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            records = resolution.read_resolution_dataset_jsonl(args.input)
+            index, report = bm25.build_bm25_index(records, k1=args.k1, b=args.b)
+            if args.index_out:
+                staged.append(
+                    (args.index_out, bm25.stage_bm25_index_json(index, args.index_out))
+                )
+            if args.report:
+                payload = {
+                    "index_version": report.index_version,
+                    "total_records": report.total_records,
+                    "indexed": report.indexed,
+                    "skipped": report.skipped,
+                    "avgdl": report.avgdl,
+                    "build_time_s": report.build_time_s,
+                    "k1": report.k1,
+                    "b": report.b,
+                    "tokenizer": report.tokenizer,
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            resolution.ResolutionDatasetError,
+            bm25.BM25Error,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.total_records} records)",
+            f"indexed: {report.indexed} resolved cases (skipped {report.skipped})",
+            f"avgdl: {report.avgdl:.2f} tokens",
+            f"build time: {report.build_time_s:.2f}s",
+        ]
+        for line in lines:
+            print(line)
+        if args.index_out:
+            print(f"index written: {args.index_out}")
+        if args.report:
+            print(f"report written: {args.report}")
+        return 0
+
+    if args.command == "retrieve-bm25":
+        if (args.index is None) == (args.input is None):
+            print("error: provide exactly one of --index or --in", file=sys.stderr)
+            return 1
+        if args.top_k < 1:
+            print("error: --top-k must be >= 1", file=sys.stderr)
+            return 1
+        problem = _output_paths_error(args.index, args.input, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            if args.index is not None:
+                index = bm25.read_bm25_index_json(args.index)
+            else:
+                records = resolution.read_resolution_dataset_jsonl(args.input)
+                index, _ = bm25.build_bm25_index(records)
+            cases = bm25.retrieve_bm25(index, args.query, top_k=args.top_k)
+            if args.report:
+                payload = {
+                    "query": args.query,
+                    "top_k": args.top_k,
+                    "results": [
+                        {
+                            "interaction_id": case.interaction_id,
+                            "score": case.score,
+                        }
+                        for case in cases
+                    ],
+                }
+                _write_json_report(args.report, payload)
+        except (
+            resolution.ResolutionDatasetError,
+            bm25.BM25Error,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        origin = args.index if args.index is not None else args.input
+        print(f"index: {origin} ({len(index.doc_ids)} cases)")
+        print(f'query: "{args.query}"')
+        if not cases:
+            print("no matching cases")
+        for rank, case in enumerate(cases, start=1):
+            print(
+                f"{rank}. interaction {case.interaction_id} "
+                f"(score {case.score:.3f})"
+            )
+        if args.report:
+            print(f"report written: {args.report}")
         return 0
 
     if args.command == "discover-intents":
