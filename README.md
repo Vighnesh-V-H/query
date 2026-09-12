@@ -110,6 +110,16 @@ uv run --package query query discover-intents --in data/rag-pool.jsonl --out dat
 
 Every opening message is embedded locally with all-MiniLM-L6-v2 (ONNX via fastembed; the ~90 MB model downloads once, then works offline) and clustered with seeded KMeans. Each cluster carries embedding-similarity candidate seeds, the examples closest to its centroid, and one labeler verdict with a one-line justification: a seed intent id, `new` for a coherent support theme the seed misses, or `junk` for non-support messages. The recorded snapshot puts all 3,000 messages in 30 clusters — 26 mapped (2,501 messages), 1 new (23, concert presale codes), 3 junk (476) — with `account_admin` and `devices_connectivity` unmapped; `docs/intent-discovery.md` is the review artifact with examples per cluster and feeds ticket 11's final taxonomy. `--workers` bounds concurrent labeler calls and `--cache` records each verdict so an interrupted run resumes; the labeler is non-deterministic, so the review is one snapshot. `--in` defaults to the RAG pool, `--taxonomy` to the seed document, and `--clusters`, `--seed`, `--examples`, and `--candidates` tune the run; all paths must be distinct.
 
+## Finalize the intent taxonomy
+
+Reconcile the discovery clusters with the seed list into the versioned final taxonomy (see `docs/adr/0010-final-intent-taxonomy.md`) and check every recorded decision against the cluster artifact:
+
+```sh
+uv run --package query query reconcile-intents --report data/intent-reconciliation-report.json
+```
+
+`docs/intent-taxonomy.md` is the versioned single source of truth (v1: 12 support intents plus an `other` fallback), and later stages import it with `query.taxonomy.read_final_taxonomy()`; `docs/intent-seed-taxonomy.md` stays as input evidence. The recorded decisions: `account_access` + `account_admin` merge into `account`, `devices_connectivity` folds into `app_technical`, and discovery's `new` cluster (concert presale codes) is promoted as `presale_codes`. `query reconcile-intents` routes every cluster of `data/intent-clusters.jsonl` through those decisions and fails on drift — a dropped seed intent that receives mapped clusters, a `new` cluster without a decision, or a final intent left without cluster evidence. The cluster artifact is committed alongside the taxonomy: it is the recorded labeler snapshot the decisions cite and cannot be exactly reproduced, so the command runs on a fresh checkout; `--in` accepts a regenerated snapshot instead. The recorded run covers all 30 clusters over 3,000 messages: 2,524 (84.13%) route to a support intent and 476 stay as `other`. `--in` defaults to the cluster artifact, `--seed` to the seed document, and `--taxonomy` to the final taxonomy; `--report` writes the per-intent coverage as JSON, and all paths must be distinct.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.

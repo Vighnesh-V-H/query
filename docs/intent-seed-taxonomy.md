@@ -2,6 +2,8 @@
 
 A domain-knowledge candidate taxonomy for SpotifyCares support, to reconcile data-driven discovery against (ticket 10) and merge into the final versioned taxonomy (ticket 11). Discovery says what is in the data; this seed says what we expect to find; neither decides the final names alone (`docs/decisions.md`, decision 12).
 
+**Superseded:** ticket 11 merged this seed with discovery into `docs/intent-taxonomy.md` (v1); this document remains as input evidence only, and later stages import the final taxonomy.
+
 The seed has **13 support intents plus an `other` fallback**; the final target is 8–15 intents (`docs/specs-v0.md` §4). Nothing here is final: discovery may find a seed intent absent, split one into two, or surface a new cluster; ticket 11 records every merge and split. Intent ids are snake_case and serve as candidates; ticket 11 owns the final ids and version.
 
 ## Seed intents

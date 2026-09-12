@@ -14,6 +14,7 @@ from query import (
     english,
     interactions,
     llm,
+    reconciliation,
     resolution,
     sampling,
     source,
@@ -311,6 +312,36 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional JSONL cache of mapping verdicts; matching entries are reused until the file is deleted",
+    )
+
+    reconcile_parser = sub.add_parser(
+        "reconcile-intents",
+        help="check the final intent taxonomy's decisions against the discovery clusters",
+    )
+    reconcile_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=discovery.DEFAULT_CLUSTERS_PATH,
+        help=f"intent clusters JSONL path (default: {discovery.DEFAULT_CLUSTERS_PATH})",
+    )
+    reconcile_parser.add_argument(
+        "--seed",
+        type=Path,
+        default=taxonomy.DEFAULT_SEED_TAXONOMY_PATH,
+        help=f"seed taxonomy Markdown path (default: {taxonomy.DEFAULT_SEED_TAXONOMY_PATH})",
+    )
+    reconcile_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    reconcile_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=f"optional path to write the coverage report as JSON (e.g. {reconciliation.DEFAULT_REPORT_PATH})",
     )
 
     args = parser.parse_args(argv)
@@ -809,6 +840,67 @@ def main(argv: list[str] | None = None) -> int:
             print(f"clusters written: {args.out}")
         if args.review:
             print(f"review written: {args.review}")
+        return 0
+
+    if args.command == "reconcile-intents":
+        problem = _output_paths_error(
+            args.input,
+            args.seed,
+            args.taxonomy,
+            args.report,
+            message="paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            clusters = discovery.read_intent_clusters_jsonl(args.input)
+            seeds = taxonomy.read_seed_taxonomy(args.seed)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            report = reconciliation.reconcile_intents(clusters, seeds, final)
+            if args.report:
+                payload = {
+                    "taxonomy_version": report.taxonomy_version,
+                    "clusters": report.clusters,
+                    "messages": report.messages,
+                    "covered_messages": report.covered_messages,
+                    "covered_share": report.covered_share,
+                    "per_intent": {
+                        intent_id: {
+                            "clusters": counts.clusters,
+                            "messages": counts.messages,
+                        }
+                        for intent_id, counts in report.per_intent.items()
+                    },
+                }
+                _write_json_report(args.report, payload)
+        except (
+            discovery.DiscoveryError,
+            taxonomy.TaxonomyError,
+            reconciliation.ReconciliationError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            (
+                f"clusters: {args.input} "
+                f"({report.clusters} clusters, {report.messages} messages)"
+            ),
+            f"taxonomy: {args.taxonomy} (v{report.taxonomy_version})",
+        ]
+        for intent_id, counts in report.per_intent.items():
+            lines.append(
+                f"{intent_id}: {counts.clusters} clusters, {counts.messages} messages"
+            )
+        lines.append(
+            f"covered: {report.covered_messages} messages "
+            f"({report.covered_share:.2%})"
+        )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")
