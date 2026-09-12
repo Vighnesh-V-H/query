@@ -274,6 +274,8 @@ def index_from_json(payload: object, location: str = "bm25 index") -> BM25Index:
         raise BM25Error(f"malformed {location}: invalid k1 {k1!r}")
     if not math.isfinite(b) or not 0 <= b <= 1:
         raise BM25Error(f"malformed {location}: invalid b {b!r}")
+    if not math.isfinite(avgdl) or avgdl < 0:
+        raise BM25Error(f"malformed {location}: invalid avgdl {avgdl!r}")
     if not isinstance(raw_docs, list):
         raise BM25Error(f"malformed {location}: docs must be a list")
     tokenizer = payload.get("tokenizer", TOKENIZER)
@@ -360,6 +362,6 @@ def read_bm25_index_json(input_path: Path | str) -> BM25Index:
         raise BM25Error(f"bm25 index JSON does not exist: {input_path}")
     try:
         payload = json.loads(input_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise BM25Error(f"malformed JSON in {input_path}: {exc}") from exc
     return index_from_json(payload, location=str(input_path))
