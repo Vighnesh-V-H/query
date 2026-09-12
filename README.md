@@ -153,7 +153,7 @@ Each session prints the Interaction with sides and timestamps, offers the final 
 
 ## Label intent dev data
 
-Label a deterministic slice of the RAG pool with final-taxonomy intents for training the TF-IDF baseline and sanity-checking the LLM classifier (see `docs/adr/0011-intent-dev-data.md`):
+Label a deterministic slice of the RAG pool with final-taxonomy intents for training the TF-IDF baseline and sanity-checking the LLM classifier (see `docs/adr/0012-intent-dev-data.md`):
 
 ```sh
 uv run --package query query label-intents --in data/rag-pool.jsonl --out data/intent-dev-labels.jsonl --report data/intent-dev-report.json --review docs/intent-dev-review.md --dev-size 500 --workers 8 --cache data/intent-dev-cache.jsonl
