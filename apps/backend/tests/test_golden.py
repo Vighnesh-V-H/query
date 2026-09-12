@@ -912,6 +912,29 @@ class TestLabelGolden:
         assert report.skipped == 1
         assert report.remaining == 1
 
+    def test_blank_opening_message_is_skipped_without_writing(self, tmp_path):
+        queue = (_queue_item(1), _queue_item(2))
+        interactions = (
+            _interaction(1, text="   "),
+            _interaction(2, text="message 2"),
+        )
+        output = tmp_path / "golden-set.jsonl"
+        ask = _ScriptedAsk(["account", "a", ""])
+        tell = _Teller()
+
+        examples, report = golden.label_golden(
+            queue, interactions, _final(), output, ask=ask, tell=tell
+        )
+
+        assert [example.interaction_id for example in examples] == [2]
+        assert report.labeled == 1
+        assert report.skipped == 1
+        assert report.remaining == 1
+        assert "blank opening message" in tell.text
+        records = golden.read_golden_jsonl(output, _final().intent_ids)
+        assert [record.interaction_id for record in records] == [2]
+        assert len(ask.prompts) == 3
+
     def test_invalid_answers_are_reprompted(self, tmp_path):
         queue = (_queue_item(1),)
         _, examples, report, ask, tell = self._labeled(
@@ -1226,6 +1249,53 @@ class TestSampleGoldenCli:
         assert "error:" in capsys.readouterr().err
         assert queue_path.read_text(encoding="utf-8") == '{"previous": "queue"}\n'
         assert report_path.read_text(encoding="utf-8") == '{"previous": "report"}\n'
+
+    def test_blank_opening_messages_are_excluded_before_hinting(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        holdout = self._write_holdout(
+            tmp_path,
+            (
+                _interaction(1, text="message 1"),
+                _interaction(2, text="   "),
+                _interaction(3, text="message 3"),
+            ),
+        )
+        labeler = _TextLabeler(
+            {
+                "message 1": ("account", "auto", "Evidence 1."),
+                "message 3": ("other", "escalate", "Evidence 3."),
+            }
+        )
+        monkeypatch.setattr(golden, "call_labeler", labeler)
+        queue_path = tmp_path / "queue.jsonl"
+        report_path = tmp_path / "report.json"
+
+        assert cli.main(
+            [
+                "sample-golden",
+                "--in",
+                str(holdout),
+                "--hints",
+                str(tmp_path / "hints.jsonl"),
+                "--out",
+                str(queue_path),
+                "--report",
+                str(report_path),
+                "--target",
+                "2",
+                "--floor",
+                "1",
+            ]
+        ) == 0
+
+        output = capsys.readouterr().out
+        assert "excluded: 1 interactions with a blank opening message" in output
+        assert len(labeler.prompts) == 2
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["hinted"] == 2
+        queue = golden.read_queue_jsonl(queue_path, _final().intent_ids)
+        assert {item.interaction_id for item in queue} == {1, 3}
 
 
 class TestLabelGoldenCli:

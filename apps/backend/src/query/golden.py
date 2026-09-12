@@ -673,6 +673,11 @@ def read_golden_jsonl(
     return tuple(examples)
 
 
+def has_customer_message(interaction: Interaction) -> bool:
+    """Whether the opening message is non-blank and therefore labelable."""
+    return bool(interaction.opening_message.text.strip())
+
+
 def label_golden(
     queue: Sequence[QueueItem],
     interactions: Sequence[Interaction],
@@ -725,6 +730,13 @@ def label_golden(
         if item.interaction_id in by_id:
             continue
         interaction = interactions_by_id[item.interaction_id]
+        if not has_customer_message(interaction):
+            skipped += 1
+            tell(
+                f"warning: interaction {item.interaction_id} has a blank opening "
+                "message; skipped."
+            )
+            continue
         tell("")
         tell(render_transcript(interaction))
         try:

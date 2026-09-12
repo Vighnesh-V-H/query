@@ -1023,10 +1023,16 @@ def main(argv: list[str] | None = None) -> int:
         staged: list[tuple[Path, Path]] = []
         try:
             found = interactions.read_interactions_jsonl(args.input)
+            labelable = tuple(
+                interaction
+                for interaction in found
+                if golden.has_customer_message(interaction)
+            )
+            excluded = len(found) - len(labelable)
             final = taxonomy.read_final_taxonomy(args.taxonomy)
             cache = golden.HintCache(args.hints)
             hints, models = golden.classify_hints(
-                found, final, workers=args.workers, cache=cache
+                labelable, final, workers=args.workers, cache=cache
             )
             items, report = golden.plan_queue(
                 hints,
@@ -1102,6 +1108,10 @@ def main(argv: list[str] | None = None) -> int:
                 f"{intent_id}: {allocation.selected}/{allocation.available} "
                 f"(auto {allocation.selected_auto}/{allocation.available_auto}, "
                 f"escalate {allocation.selected_escalate}/{allocation.available_escalate})"
+            )
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
             )
         if not golden.MIN_GOLDEN_SIZE <= report.selected <= golden.MAX_GOLDEN_SIZE:
             lines.append(
