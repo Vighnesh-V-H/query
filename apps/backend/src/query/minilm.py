@@ -283,7 +283,7 @@ def index_from_json(payload: object, location: str = "minilm index") -> MiniLMIn
     if not isinstance(model, str) or not model:
         raise MiniLMError(f"malformed {location}: invalid embedding_model")
     dim = payload.get("embedding_dim")
-    if type(dim) is not int or dim < 1:
+    if type(dim) is not int or dim < 0:
         raise MiniLMError(f"malformed {location}: invalid embedding_dim")
     try:
         build_time_s = float(payload.get("build_time_s", 0.0))
@@ -292,6 +292,8 @@ def index_from_json(payload: object, location: str = "minilm index") -> MiniLMIn
     raw_docs = payload.get("docs")
     if not isinstance(raw_docs, list):
         raise MiniLMError(f"malformed {location}: docs must be a list")
+    if raw_docs and dim < 1:
+        raise MiniLMError(f"malformed {location}: invalid embedding_dim")
     doc_ids: list[int] = []
     vectors: dict[int, tuple[float, ...]] = {}
     for position, raw in enumerate(raw_docs):
@@ -361,6 +363,6 @@ def read_minilm_index_json(input_path: Path | str) -> MiniLMIndex:
         raise MiniLMError(f"minilm index JSON does not exist: {input_path}")
     try:
         payload = json.loads(input_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise MiniLMError(f"malformed JSON in {input_path}: {exc}") from exc
     return index_from_json(payload, location=str(input_path))
