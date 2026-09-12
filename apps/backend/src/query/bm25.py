@@ -127,9 +127,9 @@ def build_bm25_index(
     addressable — they simply never score above zero. Returns the index and
     a report holding the wall-clock build time in ``build_time_s``.
     """
-    if k1 < 0:
+    if not math.isfinite(k1) or k1 < 0:
         raise BM25Error(f"invalid k1 {k1!r}: must be >= 0")
-    if not 0 <= b <= 1:
+    if not math.isfinite(b) or not 0 <= b <= 1:
         raise BM25Error(f"invalid b {b!r}: must be in [0, 1]")
     started = time.perf_counter()
     eligible = [record for record in records if record.retrieval_eligible]
@@ -270,6 +270,10 @@ def index_from_json(payload: object, location: str = "bm25 index") -> BM25Index:
         raw_docs = payload["docs"]
     except (KeyError, TypeError, ValueError) as exc:
         raise BM25Error(f"malformed {location}: {exc}") from exc
+    if not math.isfinite(k1) or k1 < 0:
+        raise BM25Error(f"malformed {location}: invalid k1 {k1!r}")
+    if not math.isfinite(b) or not 0 <= b <= 1:
+        raise BM25Error(f"malformed {location}: invalid b {b!r}")
     if not isinstance(raw_docs, list):
         raise BM25Error(f"malformed {location}: docs must be a list")
     tokenizer = payload.get("tokenizer", TOKENIZER)
