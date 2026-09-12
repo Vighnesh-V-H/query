@@ -422,8 +422,10 @@ def render_review_markdown(
         "",
         "## Label distribution",
         "",
-        f"- messages: {report.total} "
-        f"(labeler {report.labeler}, human {report.human})",
+        (
+            f"- messages: {report.total} "
+            f"(labeler {report.labeler}, human {report.human})"
+        ),
         f"- models: {', '.join(report.models) if report.models else 'none'}",
         "",
         "| Intent | Labels |",
