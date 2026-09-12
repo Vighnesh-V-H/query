@@ -100,6 +100,17 @@ uv run --package query query build-resolution-dataset --in data/rag-pool.jsonl -
 
 Each line is one Interaction's full record: `{interaction_id, dataset_version, label, retrieval_eligible, source, reason, flag_reason, model, customer_id, brand_id, turns}`. `retrieval_eligible` is derived from the label, so it is true only for Resolved Cases; Uncertain and Unresolved records stay in the dataset as evaluation negatives (ADR-0001's decision 4). The recorded snapshot holds all 3,000 RAG-pool Interactions with 215 retrieval-eligible (190 heuristic, 25 labeler); the report counts each category and the heuristic vs labeler split. The build fails if the labels do not cover the input exactly. `--in` and `--labels` default to the RAG pool and final labels; `--out` and `--report` are optional and must not collide with the inputs or each other.
 
+## BM25 retrieval
+
+Index the Resolved Cases for lexical search and rank Historical Cases for a query message (see `docs/adr/0011-bm25-retrieval.md`):
+
+```sh
+uv run --package query query build-bm25-index --in data/resolution-dataset.jsonl --index-out data/bm25-index.json --report data/bm25-report.json
+uv run --package query query retrieve-bm25 --index data/bm25-index.json --query "charged twice for premium, please refund" --top-k 5
+```
+
+Only records with `retrieval_eligible: true` enter the index — Uncertain and Unresolved cases are counted as skipped, never as evidence. The indexed text is each case's opening Customer Message, so brand replies cannot leak into lexical scores. The build is dependency-free BM25 Okapi (`k1=1.5`, `b=0.75`, ties break by ascending interaction id) and the report records the indexed/skipped volume, `avgdl`, and wall-clock `build_time_s`. `retrieve-bm25` accepts either `--index` (a persisted index) or `--in` (a dataset for a one-shot build), plus `--query`, `--top-k` (default 5), and an optional `--report` of ranked `{interaction_id, score}` pairs; a query with no overlapping terms returns no cases, which the escalation policy reads as weak evidence. The persisted `data/bm25-index.json` is the input contract for hybrid retrieval.
+
 ## Discover intents from the data
 
 Cluster the RAG pool's opening Customer Messages and reconcile each cluster against the seed taxonomy with a labeler verdict (see `docs/adr/0009-intent-discovery.md`):
