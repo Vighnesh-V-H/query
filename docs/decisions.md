@@ -26,7 +26,7 @@ Non-obvious decisions made while building Query v0, and why. (Assignment deliver
 
 12. **Intent taxonomy: clustering discovered, domain knowledge reconciled.** Embedding clusters name candidate intents; a seeded domain list (login, billing, playback, premium…) acts as a sanity checklist (see `docs/intent-seed-taxonomy.md`). Neither alone is defensible. Ticket 11 merged them into the versioned final taxonomy (`docs/intent-taxonomy.md`, see `docs/adr/0010-final-intent-taxonomy.md`): `account_access` + `account_admin` become one `account` intent, `devices_connectivity` folds into `app_technical`, and the discovered presale-code theme is promoted, for 12 support intents plus `other`. Later stages import the final taxonomy; the seed stays as input evidence.
 
-13. **Golden set: stratified with floors.** Proportional across intents with a ~10-example per-intent floor, ~60/40 auto/escalate balance, so rare intents are visible and false-auto rate has enough positives to be measurable.
+13. **Golden set: stratified with floors.** Proportional across intents with a ~10-example per-intent floor, ~60/40 auto/escalate balance, so rare intents are visible and false-auto rate has enough positives to be measurable. The holdout has no labels, so cached labeler-role hints choose the queue and a hand-labelling CLI writes the set from the full Interaction transcript (see `docs/adr/0011-golden-labeling-cli.md`).
 
 14. **Judge validated, not trusted.** ~50 golden examples double-rated by human and judge to produce the judge–human agreement evidence the assignment demands.
 
