@@ -270,54 +270,6 @@ class TestClassifyIntents:
             )
 
 
-class TestPredictionContract:
-    def test_prediction_to_json_round_trip(self):
-        prediction = classifier.IntentPrediction(
-            intent="playback", confidence=0.8, model="m", taxonomy_version=1
-        )
-
-        payload = classifier.prediction_to_json(prediction)
-
-        assert payload == {
-            "intent": "playback",
-            "confidence": 0.8,
-            "model": "m",
-            "taxonomy_version": 1,
-        }
-        assert classifier.prediction_error(prediction, ("playback", "other")) is None
-
-    def test_unknown_intent_fails_when_ids_given(self):
-        prediction = classifier.IntentPrediction(
-            intent="refund_status", confidence=0.9, model="m", taxonomy_version=1
-        )
-
-        assert "refund_status" in classifier.prediction_error(
-            prediction, ("playback",)
-        )
-
-    @pytest.mark.parametrize(
-        ("field", "value", "match"),
-        [
-            ("intent", "", "invalid intent"),
-            ("confidence", 2.0, "invalid confidence"),
-            ("confidence", float("nan"), "invalid confidence"),
-            ("model", "", "invalid model"),
-            ("taxonomy_version", 0, "invalid taxonomy_version"),
-        ],
-    )
-    def test_invalid_fields_are_reported(self, field, value, match):
-        values = {
-            "intent": "playback",
-            "confidence": 0.8,
-            "model": "m",
-            "taxonomy_version": 1,
-        }
-        values[field] = value
-        prediction = classifier.IntentPrediction(**values)
-
-        assert match in classifier.prediction_error(prediction)
-
-
 class TestClassifyIntentCli:
     def test_command_prints_intent_confidence_model_and_version(
         self, capsys, monkeypatch

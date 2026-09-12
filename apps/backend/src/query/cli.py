@@ -922,7 +922,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "classify-intent":
         try:
-            final = classifier.read_taxonomy(args.taxonomy)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
             prediction = classifier.classify_intent(args.message, final)
         except (
             classifier.ClassifierError,

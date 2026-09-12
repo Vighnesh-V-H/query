@@ -19,7 +19,6 @@ once with a repair prompt and then fails rather than guessing.
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from pathlib import Path
 
 from query import llm, taxonomy
 
@@ -191,50 +190,6 @@ def confidence_error(confidence: object) -> str | None:
     if not 0.0 <= value <= 1.0:
         return "expected a number between 0 and 1"
     return None
-
-
-def prediction_error(
-    prediction: IntentPrediction, intent_ids: Collection[str] | None = None
-) -> str | None:
-    """Check a prediction against the contract the classifier guarantees.
-
-    Shared by the classifier and by stages whose records embed a prediction,
-    so a build boundary that validates through this function provably emits
-    predictions the classifier could have produced. When ``intent_ids`` is
-    given, an intent outside them is invalid. Returns the problem, or ``None``
-    when the prediction is valid.
-    """
-    if not isinstance(prediction.intent, str) or not prediction.intent:
-        return "invalid intent"
-    if intent_ids is not None and prediction.intent not in intent_ids:
-        return f"unknown intent {prediction.intent!r}"
-    error = confidence_error(prediction.confidence)
-    if error is not None:
-        return f"invalid confidence: {error}"
-    if not isinstance(prediction.model, str) or not prediction.model:
-        return "invalid model"
-    if type(prediction.taxonomy_version) is not int or prediction.taxonomy_version < 1:
-        return "invalid taxonomy_version"
-    return None
-
-
-def prediction_to_json(prediction: IntentPrediction) -> dict:
-    """Serialize an IntentPrediction to a JSON-compatible mapping."""
-    return {
-        "intent": prediction.intent,
-        "confidence": prediction.confidence,
-        "model": prediction.model,
-        "taxonomy_version": prediction.taxonomy_version,
-    }
-
-
-def read_taxonomy(path: Path | str = DEFAULT_TAXONOMY_PATH) -> taxonomy.FinalTaxonomy:
-    """Read the final taxonomy the classifier prompts against.
-
-    Thin alias over :func:`query.taxonomy.read_final_taxonomy` so downstream
-    stages import one classifier entry point.
-    """
-    return taxonomy.read_final_taxonomy(path)
 
 
 def _require_message(message: object) -> None:
