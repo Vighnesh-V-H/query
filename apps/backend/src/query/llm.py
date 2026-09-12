@@ -27,18 +27,22 @@ def call_llm(
     temperature: float = 0.0,
     client: OpenAI | None = None,
     models_config: dict | None = None,
+    extra_body: dict | None = None,
 ) -> LLMReply:
     cfg = models_config if models_config is not None else config.load_models_config()
     model = config.model_for(role, cfg)
     client = client or make_client(cfg)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
+    request = {
+        "model": model,
+        "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
-        temperature=temperature,
-    )
+        "temperature": temperature,
+    }
+    if extra_body is not None:
+        request["extra_body"] = extra_body
+    response = client.chat.completions.create(**request)
     if not response.choices:
         raise RuntimeError(f"model '{model}' returned no choices (upstream error or rate limit)")
     content = response.choices[0].message.content or ""
