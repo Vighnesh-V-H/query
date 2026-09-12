@@ -63,6 +63,15 @@ PLAYLIST = "all my playlists disappeared overnight, please restore them"
 LOGIN = "I cannot log into my account, password reset is not working"
 
 
+def _write_dataset(tmp_path, specs):
+    """Write a resolution dataset JSONL from (interaction_id, text, label) specs."""
+    records = _records(*specs)
+    dataset_path = tmp_path / "resolution-dataset.jsonl"
+    staged = resolution.stage_resolution_dataset_jsonl(records, dataset_path)
+    staged.replace(dataset_path)
+    return dataset_path
+
+
 class TestTokenize:
     def test_lowercases_and_splits(self):
         assert bm25_mod.tokenize("Refund My CHARGE please") == (
@@ -292,15 +301,8 @@ class TestPersistence:
 
 
 class TestBuildIndexCli:
-    def _write_dataset(self, tmp_path, specs):
-        records = _records(*specs)
-        dataset_path = tmp_path / "resolution-dataset.jsonl"
-        staged = resolution.stage_resolution_dataset_jsonl(records, dataset_path)
-        staged.replace(dataset_path)
-        return dataset_path
-
     def test_command_writes_index_and_report(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(
+        dataset_path = _write_dataset(
             tmp_path,
             (
                 (1, REFUND, "resolved"),
@@ -343,7 +345,7 @@ class TestBuildIndexCli:
         assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
 
     def test_command_without_outputs_prints_stats_only(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(tmp_path, ((1, REFUND, "resolved"),))
+        dataset_path = _write_dataset(tmp_path, ((1, REFUND, "resolved"),))
 
         assert cli.main(["build-bm25-index", "--in", str(dataset_path)]) == 0
 
@@ -359,7 +361,7 @@ class TestBuildIndexCli:
         assert "error:" in capsys.readouterr().err
 
     def test_colliding_paths_return_1(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(tmp_path, ((1, REFUND, "resolved"),))
+        dataset_path = _write_dataset(tmp_path, ((1, REFUND, "resolved"),))
 
         assert cli.main(
             [
@@ -374,15 +376,8 @@ class TestBuildIndexCli:
 
 
 class TestRetrieveCli:
-    def _write_dataset(self, tmp_path, specs):
-        records = _records(*specs)
-        dataset_path = tmp_path / "resolution-dataset.jsonl"
-        staged = resolution.stage_resolution_dataset_jsonl(records, dataset_path)
-        staged.replace(dataset_path)
-        return dataset_path
-
     def test_retrieve_from_index_file(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(
+        dataset_path = _write_dataset(
             tmp_path,
             ((1, REFUND, "resolved"), (2, PLAYLIST, "resolved")),
         )
@@ -407,7 +402,7 @@ class TestRetrieveCli:
         assert "score" in output
 
     def test_retrieve_from_dataset_and_writes_report(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(
+        dataset_path = _write_dataset(
             tmp_path,
             ((1, REFUND, "resolved"), (2, PLAYLIST, "resolved")),
         )
@@ -438,7 +433,7 @@ class TestRetrieveCli:
         assert cli.main(["retrieve-bm25", "--query", "refund"]) == 1
         assert "error:" in capsys.readouterr().err
 
-        dataset_path = self._write_dataset(tmp_path, ((1, REFUND, "resolved"),))
+        dataset_path = _write_dataset(tmp_path, ((1, REFUND, "resolved"),))
         assert cli.main(
             [
                 "retrieve-bm25",
@@ -453,7 +448,7 @@ class TestRetrieveCli:
         assert "error:" in capsys.readouterr().err
 
     def test_retrieve_rejects_bad_top_k(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(tmp_path, ((1, REFUND, "resolved"),))
+        dataset_path = _write_dataset(tmp_path, ((1, REFUND, "resolved"),))
 
         assert cli.main(
             [
@@ -481,7 +476,7 @@ class TestRetrieveCli:
         assert "error:" in capsys.readouterr().err
 
     def test_retrieve_without_overlap_reports_no_cases(self, tmp_path, capsys):
-        dataset_path = self._write_dataset(tmp_path, ((1, REFUND, "resolved"),))
+        dataset_path = _write_dataset(tmp_path, ((1, REFUND, "resolved"),))
 
         assert cli.main(
             ["retrieve-bm25", "--in", str(dataset_path), "--query", "xylophone zebra"]
