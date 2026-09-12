@@ -100,6 +100,17 @@ uv run --package query query build-resolution-dataset --in data/rag-pool.jsonl -
 
 Each line is one Interaction's full record: `{interaction_id, dataset_version, label, retrieval_eligible, source, reason, flag_reason, model, customer_id, brand_id, turns}`. `retrieval_eligible` is derived from the label, so it is true only for Resolved Cases; Uncertain and Unresolved records stay in the dataset as evaluation negatives (ADR-0001's decision 4). The recorded snapshot holds all 3,000 RAG-pool Interactions with 215 retrieval-eligible (190 heuristic, 25 labeler); the report counts each category and the heuristic vs labeler split. The build fails if the labels do not cover the input exactly. `--in` and `--labels` default to the RAG pool and final labels; `--out` and `--report` are optional and must not collide with the inputs or each other.
 
+## Semantic retrieval (MiniLM)
+
+Index the Resolved Cases with local MiniLM embeddings and rank Historical Cases for a query message:
+
+```sh
+uv run --package query query build-minilm-index --in data/resolution-dataset.jsonl --index-out data/minilm-index.json --report data/minilm-report.json
+uv run --package query query retrieve-minilm --index data/minilm-index.json --query "charged twice for premium, please refund" --top-k 5
+```
+
+Only records with `retrieval_eligible: true` enter the index — Uncertain and Unresolved cases are counted as skipped, never as evidence. The indexed text is each case's opening Customer Message, so brand replies cannot leak into similarity scores. Embeddings are local all-MiniLM-L6-v2 vectors (the ~90 MB model downloads once, then works offline); the build records the indexed/skipped volume, the embedding model and dimension, and wall-clock `build_time_s`. `retrieve-minilm` accepts either `--index` (a persisted index) or `--in` (a dataset for a one-shot build), plus `--query`, `--top-k` (default 5), and an optional `--report` of ranked `{interaction_id, score}` pairs; it returns the top-K cases unconditionally with raw cosine scores intact (an empty query or an empty index returns no cases), so the escalation policy can judge low scores as weak evidence. The persisted `data/minilm-index.json` is the input contract for hybrid retrieval.
+
 ## Discover intents from the data
 
 Cluster the RAG pool's opening Customer Messages and reconcile each cluster against the seed taxonomy with a labeler verdict (see `docs/adr/0009-intent-discovery.md`):
