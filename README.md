@@ -151,6 +151,16 @@ uv run --package query query label-golden --queue data/golden-queue.jsonl --hold
 
 Each session prints the Interaction with sides and timestamps, offers the final taxonomy as a numbered menu (`?`), and prompts for a gold intent, a gold auto/escalate decision, and optional notes; `s` skips an example and `q` pauses at every prompt. Every completed label is written before the next Interaction is shown, so an interrupted session resumes by skipping the ids already labelled, and a queue and Golden Set that do not belong together fail instead of mixing. Each line is `{interaction_id, taxonomy_version, customer_message, gold_intent, gold_decision, notes, hint_intent, hint_decision}`; the report carries the per-intent and per-decision distribution, notes coverage, and predicted-versus-gold agreement, keyed to the Golden Set and taxonomy versions.
 
+## Label intent dev data
+
+Label a deterministic slice of the RAG pool with final-taxonomy intents for training the TF-IDF baseline and sanity-checking the LLM classifier (see `docs/adr/0011-intent-dev-data.md`):
+
+```sh
+uv run --package query query label-intents --in data/rag-pool.jsonl --out data/intent-dev-labels.jsonl --report data/intent-dev-report.json --review docs/intent-dev-review.md --dev-size 500 --workers 8 --cache data/intent-dev-cache.jsonl
+```
+
+Each output line is one Interaction's `{interaction_id, customer_message, intent, source, justification, model, taxonomy_version}`: fresh labels carry `source: labeler` with the model's one-line justification, and labels corrected by hand carry `source: human`. The slice ranks every Interaction by a SHA-256 of the seed and its interaction id (`--seed`, default 42) and labels the top `--dev-size` (default 500), so the same seed labels the same slice on any machine. Only the RAG pool is ever labeled — the holdout stays reserved for the Golden Set. The report counts the label distribution per intent (including zeros for uncovered intents), the labeler/human source split, and the models used. The labeler is non-deterministic, so `--cache` records each verdict as it completes and an interrupted run resumes without re-calling; `--in` defaults to the RAG pool, `--taxonomy` to the final taxonomy, and all paths must be distinct. The human spot-check of a 30-label trial slice (28/30 agreement, both misses on documented taxonomy boundaries) is recorded in `docs/intent-dev-spot-check.md`.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
