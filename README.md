@@ -5,7 +5,7 @@ AI support agent for SpotifyCares — intent classification, grounded replies, a
 ```text
 apps/
 ├── backend/    Python pipeline (uv workspace member, package "query")
-└── frontend/   Next.js chat UI (planned)
+└── frontend/   Next.js minimal chat UI (mocked pipeline; see apps/frontend/README.md)
 ```
 
 ## Backend setup
