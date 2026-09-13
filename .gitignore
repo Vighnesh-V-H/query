@@ -2,6 +2,7 @@ data/*
 !data/intent-clusters.jsonl
 !data/intent-dev-labels.jsonl
 !data/intent-dev-report.json
+!data/intent-dev-corrections.jsonl
 .scratch/
 .env
 __pycache__/

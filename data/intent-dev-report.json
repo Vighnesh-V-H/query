@@ -6,22 +6,22 @@
   "total": 500,
   "per_intent": {
     "account": 47,
-    "billing_payment": 46,
-    "subscription_plans": 51,
+    "billing_payment": 48,
+    "subscription_plans": 49,
     "family_plan": 16,
     "playback": 37,
-    "library_playlists": 12,
+    "library_playlists": 11,
     "downloads_offline": 11,
-    "app_technical": 65,
-    "content_availability": 57,
+    "app_technical": 66,
+    "content_availability": 58,
     "market_availability": 26,
     "feature_feedback": 66,
-    "presale_codes": 8,
-    "other": 58
+    "presale_codes": 6,
+    "other": 59
   },
   "sources": {
-    "labeler": 500,
-    "human": 0
+    "labeler": 495,
+    "human": 5
   },
   "models": [
     "nvidia/nemotron-3.5-lightning-30b-a3b"

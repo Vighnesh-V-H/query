@@ -65,13 +65,37 @@ temperature 0.0, and the fresh run moved three of the trial verdicts:
 | 1161837 | `app_technical` | `library_playlists` | `app_technical` (update cause beats library symptom) |
 
 Under the audit's independent judgments the committed 30-prefix agrees 27/30
-(723755 now matches; 189914, 1161837, and 2902781 disagree). The committed
-labels are therefore the pinned record: a rerun with the same cache
-reproduces them exactly, and a fresh run may move verdicts again. All 13
-intents have labels in the committed 500, thinnest `presale_codes` at 8
-(1.6%).
+before corrections (723755 now matches; 189914, 1161837, and 2902781
+disagree). The committed labels are therefore the pinned record: the cache
+replays the labeler's verdicts exactly and the corrections below replay the
+human ones, while a fresh run may move verdicts again.
+
+## Human corrections
+
+The committed run's three disagreements (189914, 1161837, 2902781) and a
+re-audit of all 8 `presale_codes` labels (the thinnest intent, where the run
+also mislabeled 820235 and 1733259) are corrected in
+`data/intent-dev-corrections.jsonl` and applied as `source: human` labels by
+`query label-intents --corrections data/intent-dev-corrections.jsonl`, so the
+committed labels carry the human verdict wherever the labeler failed:
+
+| Interaction | Labeler | Corrected | Reason |
+|-------------|---------|-----------|--------|
+| 820235 | `presale_codes` | `other` | DM/chatter with no request; the brand reply confirms |
+| 189914 | `subscription_plans` | `billing_payment` | price-rise question is a money matter |
+| 1161837 | `library_playlists` | `app_technical` | update dropped the songs; cause beats library symptom |
+| 1733259 | `presale_codes` | `content_availability` | album add request, not a presale-code request |
+| 2902781 | `subscription_plans` | `billing_payment` | paid upgrade did not unlock the plan (finding 2) |
+
+With the corrections applied, the committed 30-prefix agrees 30/30 with the
+audit. All 13 intents have labels in the committed 500, thinnest
+`presale_codes` at 6 (1.2%) after the two presale corrections — a stronger
+training caveat for ticket 13.
 
 ## Findings
+
+The committed run's flags (1 and 2) were corrected by hand, but the labeler
+failures they expose stay open for the prompt work in ticket 14.
 
 1. **Vague device-trouble filed as `other` (723755).** "Anyone else having
    trouble with Spotify on Galaxy S7?" states a device problem a support team
@@ -93,8 +117,8 @@ intents have labels in the committed 500, thinnest `presale_codes` at 8
    and zero `presale_codes` labels. Expected at this size (presale is 0.77%
    of the RAG pool) and honestly reported by the per-intent zeros — not a
    labeling failure; the committed 500-label slice covers `presale_codes` with
-   8 labels, still its thinnest intent, which ticket 13's training split must
-   handle.
+   6 labels after corrections, still its thinnest intent, which ticket 13's
+   training split must handle.
 
 ## Follow-ups
 
@@ -102,6 +126,7 @@ intents have labels in the committed 500, thinnest `presale_codes` at 8
   class weights for `presale_codes` and other thin intents.
 - Ticket 14 (LLM classifier): adopt findings 1–2 as prompt examples; reuse
   this 30-label slice as the first sanity-check set.
-- Re-audit after any prompt change; the committed labels and the prompt-hash
-  cache pin this run's verdicts, so a re-run with new examples recomputes
-  cleanly.
+- Re-audit after any prompt change; the committed labels, prompt-hash cache,
+  and `data/intent-dev-corrections.jsonl` pin this run's verdicts, and a
+  correction that no longer matches the slice fails the run instead of
+  silently drifting.
