@@ -7,6 +7,7 @@ from pathlib import Path
 
 from query import (
     adjudication,
+    classifier,
     closure,
     config,
     discovery,
@@ -404,6 +405,22 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help=f"optional path to write the coverage report as JSON (e.g. {reconciliation.DEFAULT_REPORT_PATH})",
+    )
+
+    classify_parser = sub.add_parser(
+        "classify-intent",
+        help="classify one customer message into the final intent taxonomy",
+    )
+    classify_parser.add_argument(
+        "--message",
+        required=True,
+        help="the opening Customer Message to classify",
+    )
+    classify_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=classifier.DEFAULT_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {classifier.DEFAULT_TAXONOMY_PATH})",
     )
 
     sample_golden_parser = sub.add_parser(
@@ -1256,6 +1273,24 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         if args.report:
             print(f"report written: {args.report}")
+        return 0
+
+    if args.command == "classify-intent":
+        try:
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            prediction = classifier.classify_intent(args.message, final)
+        except (
+            classifier.ClassifierError,
+            taxonomy.TaxonomyError,
+            config.ConfigError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(f"taxonomy: {args.taxonomy} (v{prediction.taxonomy_version})")
+        print(f"intent: {prediction.intent}")
+        print(f"confidence: {prediction.confidence:.2f}")
+        print(f"model: {prediction.model}")
         return 0
 
     if args.command == "sample-golden":
