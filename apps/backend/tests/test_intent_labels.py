@@ -840,6 +840,7 @@ class TestLabelIntentsCli:
             pool, tmp_path / "rag-pool.jsonl"
         )
         out_path = tmp_path / "intent-dev-labels.jsonl"
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
         monkeypatch.setattr(intent_labels, "call_labeler", _RoutingLabeler())
 
         assert (
