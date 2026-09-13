@@ -665,9 +665,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         lines = [
             f"input: {args.input} ({report.total} interactions)",
-            f"retained: {report.retained} "
-            f"(english {report.retained - report.no_signal}, "
-            f"no confident signal {report.no_signal})",
+            (
+                f"retained: {report.retained} "
+                f"(english {report.retained - report.no_signal}, "
+                f"no confident signal {report.no_signal})"
+            ),
             f"filtered: {report.filtered} ({report.filter_rate:.2%})",
         ]
         if report.filtered_by_language:

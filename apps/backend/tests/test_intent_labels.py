@@ -3,7 +3,6 @@ import threading
 from datetime import datetime, timezone
 
 import pytest
-
 from query import cli, intent_labels, llm, taxonomy
 from query import interactions as interactions_mod
 from query.interactions import Interaction, Turn
