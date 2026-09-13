@@ -13,6 +13,7 @@ from query import (
     embedding,
     english,
     golden,
+    intent_labels,
     interactions,
     llm,
     minilm,
@@ -509,6 +510,79 @@ def main(argv: list[str] | None = None) -> int:
         help=f"optional path to write the labeling report as JSON (e.g. {golden.DEFAULT_LABELING_REPORT_PATH})",
     )
 
+    label_intents_parser = sub.add_parser(
+        "label-intents",
+        help="label a deterministic dev slice of the RAG pool with final-taxonomy intents",
+    )
+    label_intents_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=intent_labels.DEFAULT_POOL_PATH,
+        help=(
+            "Interactions JSONL path; must be the RAG pool or a subset of it "
+            f"(default: {intent_labels.DEFAULT_POOL_PATH})"
+        ),
+    )
+    label_intents_parser.add_argument(
+        "--corrections",
+        type=Path,
+        default=None,
+        help=(
+            "optional JSONL of hand corrections "
+            '({"interaction_id", "intent", "justification"}) applied as '
+            "source: human over the labeler verdicts"
+        ),
+    )
+    label_intents_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--dev-size",
+        type=int,
+        default=intent_labels.DEFAULT_DEV_SIZE,
+        help=f"Interactions to label (default: {intent_labels.DEFAULT_DEV_SIZE})",
+    )
+    label_intents_parser.add_argument(
+        "--seed",
+        type=int,
+        default=intent_labels.DEFAULT_SEED,
+        help=f"dev-slice ranking seed (default: {intent_labels.DEFAULT_SEED})",
+    )
+    label_intents_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the dev labels as JSON Lines (e.g. {intent_labels.DEFAULT_LABELS_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the label distribution report as JSON",
+    )
+    label_intents_parser.add_argument(
+        "--review",
+        type=Path,
+        default=None,
+        help=f"optional path to write the Markdown review of labels per intent (e.g. {intent_labels.DEFAULT_REVIEW_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+    label_intents_parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="optional JSONL cache of labeler verdicts; matching entries are reused until the file is deleted",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "smoke-llm":
@@ -604,9 +678,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         lines = [
             f"input: {args.input} ({report.total} interactions)",
-            f"retained: {report.retained} "
-            f"(english {report.retained - report.no_signal}, "
-            f"no confident signal {report.no_signal})",
+            (
+                f"retained: {report.retained} "
+                f"(english {report.retained - report.no_signal}, "
+                f"no confident signal {report.no_signal})"
+            ),
             f"filtered: {report.filtered} ({report.filter_rate:.2%})",
         ]
         if report.filtered_by_language:
@@ -1200,7 +1276,7 @@ def main(argv: list[str] | None = None) -> int:
             labelable = tuple(
                 interaction
                 for interaction in found
-                if golden.has_customer_message(interaction)
+                if interactions.has_customer_message(interaction)
             )
             excluded = len(found) - len(labelable)
             final = taxonomy.read_final_taxonomy(args.taxonomy)
@@ -1376,6 +1452,136 @@ def main(argv: list[str] | None = None) -> int:
             print(f"report written: {args.report}")
         if Path(args.out).is_file():
             print(f"golden set written: {args.out}")
+        return 0
+
+    if args.command == "label-intents":
+        pool_guard = (
+            intent_labels.DEFAULT_POOL_PATH
+            if intent_labels.DEFAULT_POOL_PATH.resolve() != args.input.resolve()
+            else None
+        )
+        problem = _output_paths_error(
+            args.input,
+            pool_guard,
+            args.taxonomy,
+            args.corrections,
+            args.out,
+            args.report,
+            args.review,
+            args.cache,
+            message="paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            excluded = sum(
+                1
+                for interaction in found
+                if not interactions.has_customer_message(interaction)
+            )
+            if pool_guard is None:
+                pool = found
+            else:
+                try:
+                    pool = interactions.read_interactions_jsonl(
+                        intent_labels.DEFAULT_POOL_PATH
+                    )
+                except interactions.InteractionsError as exc:
+                    raise intent_labels.IntentLabelError(
+                        f"cannot read the RAG pool "
+                        f"{intent_labels.DEFAULT_POOL_PATH}: {exc}"
+                    ) from exc
+            intent_labels.require_pool_membership(found, pool)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            corrections = (
+                intent_labels.read_corrections_jsonl(
+                    args.corrections, final.intent_ids
+                )
+                if args.corrections
+                else None
+            )
+            cache = intent_labels.IntentLabelCache(args.cache) if args.cache else None
+            labels, report = intent_labels.label_dev_slice(
+                found,
+                final,
+                dev_size=args.dev_size,
+                seed=args.seed,
+                workers=args.workers,
+                cache=cache,
+                corrections=corrections,
+            )
+            if args.out:
+                staged.append(
+                    (
+                        args.out,
+                        intent_labels.stage_intent_labels_jsonl(labels, args.out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "taxonomy_version": report.taxonomy_version,
+                    "seed": report.seed,
+                    "input_total": report.input_total,
+                    "requested": report.requested,
+                    "total": report.total,
+                    "per_intent": dict(report.per_intent),
+                    "sources": {
+                        "labeler": report.labeler,
+                        "human": report.human,
+                    },
+                    "models": list(report.models),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            if args.review:
+                staged.append(
+                    (
+                        args.review,
+                        intent_labels.stage_review_markdown(
+                            labels, report, final, args.review
+                        ),
+                    )
+                )
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            intent_labels.IntentLabelError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.input_total} interactions)",
+            f"taxonomy: {args.taxonomy} (v{report.taxonomy_version})",
+            (
+                f"dev slice: {report.total} of {report.input_total} "
+                f"(requested {report.requested}, seed {report.seed})"
+            ),
+        ]
+        for intent_id in final.intent_ids:
+            lines.append(f"{intent_id}: {report.per_intent.get(intent_id, 0)}")
+        lines.append(f"sources: labeler {report.labeler}, human {report.human}")
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
+            )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"labels written: {args.out}")
+        if args.review:
+            print(f"review written: {args.review}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")

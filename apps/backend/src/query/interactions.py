@@ -92,6 +92,11 @@ class Interaction:
         return self.turns[0]
 
 
+def has_customer_message(interaction: Interaction) -> bool:
+    """Whether the opening message is non-blank and therefore labelable."""
+    return bool(interaction.opening_message.text.strip())
+
+
 @dataclass(frozen=True)
 class InteractionsReport:
     """Counts for every stitching stage, for honest reporting."""
