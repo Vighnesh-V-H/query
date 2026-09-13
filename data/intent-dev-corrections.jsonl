@@ -1,0 +1,5 @@
+{"interaction_id": 820235, "intent": "other", "justification": "Support-channel chatter: the customer announces a DM and the brand's reply confirms it, with no issue or request a support team would act on."}
+{"interaction_id": 189914, "intent": "billing_payment", "justification": "A question about a possible monthly price rise is a money matter, so billing_payment rather than a plan choice."}
+{"interaction_id": 1161837, "intent": "app_technical", "justification": "Songs dropped by a new app update: the update cause governs over the library symptom."}
+{"interaction_id": 1733259, "intent": "content_availability", "justification": "An album add request is catalog content availability, not an artist presale-code request."}
+{"interaction_id": 2902781, "intent": "billing_payment", "justification": "A completed upgrade payment that did not unlock the plan is a billing matter per the boundary rules."}

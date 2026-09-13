@@ -5,7 +5,7 @@ AI support agent for SpotifyCares — intent classification, grounded replies, a
 ```text
 apps/
 ├── backend/    Python pipeline (uv workspace member, package "query")
-└── frontend/   Next.js chat UI (planned)
+└── frontend/   Next.js minimal chat UI (mocked pipeline; see apps/frontend/README.md)
 ```
 
 ## Backend setup
@@ -100,6 +100,17 @@ uv run --package query query build-resolution-dataset --in data/rag-pool.jsonl -
 
 Each line is one Interaction's full record: `{interaction_id, dataset_version, label, retrieval_eligible, source, reason, flag_reason, model, customer_id, brand_id, turns}`. `retrieval_eligible` is derived from the label, so it is true only for Resolved Cases; Uncertain and Unresolved records stay in the dataset as evaluation negatives (ADR-0001's decision 4). The recorded snapshot holds all 3,000 RAG-pool Interactions with 215 retrieval-eligible (190 heuristic, 25 labeler); the report counts each category and the heuristic vs labeler split. The build fails if the labels do not cover the input exactly. `--in` and `--labels` default to the RAG pool and final labels; `--out` and `--report` are optional and must not collide with the inputs or each other.
 
+## Semantic retrieval (MiniLM)
+
+Index the Resolved Cases with local MiniLM embeddings and rank Historical Cases for a query message:
+
+```sh
+uv run --package query query build-minilm-index --in data/resolution-dataset.jsonl --index-out data/minilm-index.json --report data/minilm-report.json
+uv run --package query query retrieve-minilm --index data/minilm-index.json --query "charged twice for premium, please refund" --top-k 5
+```
+
+Only records with `retrieval_eligible: true` enter the index — Uncertain and Unresolved cases are counted as skipped, never as evidence. The indexed text is each case's opening Customer Message, so brand replies cannot leak into similarity scores. Embeddings are local all-MiniLM-L6-v2 vectors (the ~90 MB model downloads once, then works offline); the build records the indexed/skipped volume, the embedding model and dimension, and wall-clock `build_time_s`. `retrieve-minilm` accepts either `--index` (a persisted index) or `--in` (a dataset for a one-shot build), plus `--query`, `--top-k` (default 5), and an optional `--report` of ranked `{interaction_id, score}` pairs; it returns the top-K cases unconditionally with raw cosine scores intact (an empty query or an empty index returns no cases), so the escalation policy can judge low scores as weak evidence. The persisted `data/minilm-index.json` is the input contract for hybrid retrieval.
+
 ## Discover intents from the data
 
 Cluster the RAG pool's opening Customer Messages and reconcile each cluster against the seed taxonomy with a labeler verdict (see `docs/adr/0009-intent-discovery.md`):
@@ -129,6 +140,36 @@ uv run --package query query classify-intent --message "my music is not playing"
 ```
 
 The prompt is rendered from `docs/intent-taxonomy.md`, so the taxonomy version travels with the prompt and the prediction records the version it was classified under; `--taxonomy` points at another taxonomy document when one is under review. An intent outside the taxonomy, or a confidence outside 0-1, is retried once with a repair prompt and then fails rather than guessing.
+
+## Sample the Golden Set queue
+
+Stratify the holdout into a labelling queue with a per-intent floor and a target auto/escalate balance (see `docs/adr/0011-golden-labeling-cli.md`):
+
+```sh
+uv run --package query query sample-golden --in data/holdout.jsonl --out data/golden-queue.jsonl --report data/golden-sampling-report.json --workers 8
+```
+
+The holdout has no intent labels, so the configured `labeler` role predicts one intent and a coarse auto/escalate decision per holdout message; the predictions are cached by prompt hash in `data/holdout-hints.jsonl` and only choose which Interactions get served — they are never shown to the human and never become gold. Each intent is apportioned proportionally with a floor of 10 examples, and each quota is split between predicted-auto and predicted-escalate candidates to land on 60/40; the floors win when they alone exceed the target of 200. The sampling report records per-intent availability and selection, the predicted balance, and whether the target was reachable, so an infeasible target is visible rather than silently missed. `--target`, `--floor`, `--auto-share`, `--seed`, and `--workers` tune the run; `--hints` points at a different hint cache or an external artifact in the same format, and hints without a prompt hash are trusted as given. Interactions with a blank opening message are excluded before hinting and counted on the console, and one that reaches the queue anyway is skipped rather than written, because the Golden Set reader rejects an empty `customer_message`.
+
+## Label the Golden Set
+
+Serve the queue one Interaction at a time, with the full transcript, for hand-labelling:
+
+```sh
+uv run --package query query label-golden --queue data/golden-queue.jsonl --holdout data/holdout.jsonl --out data/golden-set.jsonl --report data/golden-report.json
+```
+
+Each session prints the Interaction with sides and timestamps, offers the final taxonomy as a numbered menu (`?`), and prompts for a gold intent, a gold auto/escalate decision, and optional notes; `s` skips an example and `q` pauses at every prompt. Every completed label is written before the next Interaction is shown, so an interrupted session resumes by skipping the ids already labelled, and a queue and Golden Set that do not belong together fail instead of mixing. Each line is `{interaction_id, taxonomy_version, customer_message, gold_intent, gold_decision, notes, hint_intent, hint_decision}`; the report carries the per-intent and per-decision distribution, notes coverage, and predicted-versus-gold agreement, keyed to the Golden Set and taxonomy versions.
+
+## Label intent dev data
+
+Label a deterministic slice of the RAG pool with final-taxonomy intents for training the TF-IDF baseline and sanity-checking the LLM classifier (see `docs/adr/0012-intent-dev-data.md`):
+
+```sh
+uv run --package query query label-intents --in data/rag-pool.jsonl --out data/intent-dev-labels.jsonl --report data/intent-dev-report.json --review docs/intent-dev-review.md --dev-size 500 --workers 8 --cache data/intent-dev-cache.jsonl --corrections data/intent-dev-corrections.jsonl
+```
+
+Each output line is one Interaction's `{interaction_id, customer_message, intent, source, justification, model, taxonomy_version}`: fresh labels carry `source: labeler` with the model's one-line justification, and labels corrected by hand carry `source: human`. The slice ranks every Interaction by a SHA-256 of the seed and its interaction id (`--seed`, default 42) and labels the top `--dev-size` (default 500), so the same seed labels the same slice on any machine. Interactions with a blank opening message are excluded before ranking and counted on the console, because the label contract rejects an empty `customer_message`. Only the RAG pool is labelable — every input Interaction is checked against the canonical `data/rag-pool.jsonl` and anything outside it fails before any labeler call, so the holdout stays reserved for the Golden Set. `--corrections` applies hand fixes (`data/intent-dev-corrections.jsonl`) as `source: human` labels over the labeler verdicts, and a correction outside the slice fails the run. The report counts the label distribution per intent (including zeros for uncovered intents), the labeler/human source split, and the models used. The labeler is non-deterministic, so `--cache` records each verdict as it completes and an interrupted run resumes without re-calling; `--in` defaults to the RAG pool, `--taxonomy` to the final taxonomy, and all paths must be distinct. The recorded 500-label run is committed (`data/intent-dev-labels.jsonl` plus its report, review, and corrections), so downstream stages run on a fresh checkout; regenerating it needs the provider credential. The human spot-check of the 30-label trial prefix (28/30 agreement; the committed prefix agrees 30/30 after five hand corrections) is recorded in `docs/intent-dev-spot-check.md`.
 
 ## Model configuration
 

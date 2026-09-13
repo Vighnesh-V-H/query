@@ -5,10 +5,11 @@ class _FakeCompletions:
     def __init__(self, content):
         self._content = content
 
-    def create(self, model, messages, temperature):
+    def create(self, model, messages, temperature, **kwargs):
         self.last_model = model
         self.last_messages = messages
         self.last_temperature = temperature
+        self.last_extra_body = kwargs.get("extra_body")
 
         class _Msg:
             content = self._content
@@ -48,6 +49,30 @@ def test_call_llm_uses_configured_role_model(monkeypatch):
     assert reply.model == "test/gen"
     assert fake.completions.last_model == "test/gen"
     assert fake.completions.last_messages[1]["content"] == "hi"
+    assert fake.completions.last_extra_body is None
+
+
+def test_call_llm_forwards_extra_body_only_when_given(monkeypatch):
+    for role in llm.config.ROLES:
+        monkeypatch.delenv(f"QUERY_{role.upper()}_MODEL", raising=False)
+    fake = _FakeClient(content="ok")
+    cfg = {
+        "generator": "test/gen",
+        "judge": "test/judge",
+        "labeler": "test/labeler",
+        "provider": {"base_url": "https://example.invalid/v1"},
+    }
+
+    llm.call_llm(
+        "hi",
+        client=fake,
+        models_config=cfg,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+    )
+
+    assert fake.completions.last_extra_body == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
 
 
 def test_make_client_uses_config(monkeypatch):

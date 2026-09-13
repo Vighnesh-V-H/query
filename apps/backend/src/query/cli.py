@@ -13,8 +13,11 @@ from query import (
     discovery,
     embedding,
     english,
+    golden,
+    intent_labels,
     interactions,
     llm,
+    minilm,
     reconciliation,
     resolution,
     sampling,
@@ -243,6 +246,65 @@ def main(argv: list[str] | None = None) -> int:
         help="optional path to write the resolution report as JSON",
     )
 
+    minilm_build_parser = sub.add_parser(
+        "build-minilm-index",
+        help="index Resolved Cases with local MiniLM embeddings and record the build time",
+    )
+    minilm_build_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=minilm.DEFAULT_DATASET_PATH,
+        help=f"resolution dataset JSONL path (default: {minilm.DEFAULT_DATASET_PATH})",
+    )
+    minilm_build_parser.add_argument(
+        "--index-out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the MiniLM index as JSON (e.g. {minilm.DEFAULT_INDEX_PATH})",
+    )
+    minilm_build_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the build report as JSON",
+    )
+
+    minilm_retrieve_parser = sub.add_parser(
+        "retrieve-minilm",
+        help="rank Historical Cases for a query with a MiniLM index",
+    )
+    minilm_retrieve_parser.add_argument(
+        "--index",
+        type=Path,
+        default=None,
+        help=f"persisted MiniLM index JSON path (e.g. {minilm.DEFAULT_INDEX_PATH})",
+    )
+    minilm_retrieve_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=None,
+        help="resolution dataset JSONL path: builds an ephemeral index instead of --index",
+    )
+    minilm_retrieve_parser.add_argument(
+        "--query",
+        required=True,
+        help="customer message to rank Historical Cases against",
+    )
+    minilm_retrieve_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=minilm.DEFAULT_TOP_K,
+        help=f"cases to return (default: {minilm.DEFAULT_TOP_K})",
+    )
+    minilm_retrieve_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the ranked cases as JSON",
+    )
+
     discover_parser = sub.add_parser(
         "discover-intents",
         help="cluster RAG-pool Customer Messages and map each cluster to the seed taxonomy",
@@ -361,6 +423,183 @@ def main(argv: list[str] | None = None) -> int:
         help=f"final taxonomy Markdown path (default: {classifier.DEFAULT_TAXONOMY_PATH})",
     )
 
+    sample_golden_parser = sub.add_parser(
+        "sample-golden",
+        help="stratify holdout Interactions into a Golden Set labeling queue",
+    )
+    sample_golden_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=golden.DEFAULT_HOLDOUT_PATH,
+        help=f"holdout JSONL path (default: {golden.DEFAULT_HOLDOUT_PATH}; never the RAG pool)",
+    )
+    sample_golden_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--hints",
+        type=Path,
+        default=golden.DEFAULT_HINTS_PATH,
+        help=(
+            "intent/decision hint cache, read and extended with fresh labeler "
+            f"verdicts (default: {golden.DEFAULT_HINTS_PATH})"
+        ),
+    )
+    sample_golden_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the queue as JSON Lines (e.g. {golden.DEFAULT_QUEUE_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=f"optional path to write the sampling report as JSON (e.g. {golden.DEFAULT_SAMPLING_REPORT_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--target",
+        type=int,
+        default=golden.DEFAULT_TARGET_SIZE,
+        help=f"Golden Set size to plan (default: {golden.DEFAULT_TARGET_SIZE})",
+    )
+    sample_golden_parser.add_argument(
+        "--floor",
+        type=int,
+        default=golden.DEFAULT_FLOOR,
+        help=f"minimum examples per intent (default: {golden.DEFAULT_FLOOR})",
+    )
+    sample_golden_parser.add_argument(
+        "--auto-share",
+        type=float,
+        default=golden.DEFAULT_AUTO_SHARE,
+        help=f"target share of predicted-auto examples (default: {golden.DEFAULT_AUTO_SHARE})",
+    )
+    sample_golden_parser.add_argument(
+        "--seed",
+        type=int,
+        default=golden.DEFAULT_SEED,
+        help=f"selection seed (default: {golden.DEFAULT_SEED})",
+    )
+    sample_golden_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+
+    label_golden_parser = sub.add_parser(
+        "label-golden",
+        help="serve a Golden Set queue with the full Interaction for hand-labeling",
+    )
+    label_golden_parser.add_argument(
+        "--queue",
+        type=Path,
+        default=golden.DEFAULT_QUEUE_PATH,
+        help=f"queue JSONL path (default: {golden.DEFAULT_QUEUE_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--holdout",
+        type=Path,
+        default=golden.DEFAULT_HOLDOUT_PATH,
+        help=f"holdout JSONL path with the source Interactions (default: {golden.DEFAULT_HOLDOUT_PATH}; never the RAG pool)",
+    )
+    label_golden_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help=f"path to write the Golden Set as JSON Lines (e.g. {golden.DEFAULT_GOLDEN_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=f"optional path to write the labeling report as JSON (e.g. {golden.DEFAULT_LABELING_REPORT_PATH})",
+    )
+
+    label_intents_parser = sub.add_parser(
+        "label-intents",
+        help="label a deterministic dev slice of the RAG pool with final-taxonomy intents",
+    )
+    label_intents_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=intent_labels.DEFAULT_POOL_PATH,
+        help=(
+            "Interactions JSONL path; must be the RAG pool or a subset of it "
+            f"(default: {intent_labels.DEFAULT_POOL_PATH})"
+        ),
+    )
+    label_intents_parser.add_argument(
+        "--corrections",
+        type=Path,
+        default=None,
+        help=(
+            "optional JSONL of hand corrections "
+            '({"interaction_id", "intent", "justification"}) applied as '
+            "source: human over the labeler verdicts"
+        ),
+    )
+    label_intents_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--dev-size",
+        type=int,
+        default=intent_labels.DEFAULT_DEV_SIZE,
+        help=f"Interactions to label (default: {intent_labels.DEFAULT_DEV_SIZE})",
+    )
+    label_intents_parser.add_argument(
+        "--seed",
+        type=int,
+        default=intent_labels.DEFAULT_SEED,
+        help=f"dev-slice ranking seed (default: {intent_labels.DEFAULT_SEED})",
+    )
+    label_intents_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the dev labels as JSON Lines (e.g. {intent_labels.DEFAULT_LABELS_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="optional path to write the label distribution report as JSON",
+    )
+    label_intents_parser.add_argument(
+        "--review",
+        type=Path,
+        default=None,
+        help=f"optional path to write the Markdown review of labels per intent (e.g. {intent_labels.DEFAULT_REVIEW_PATH})",
+    )
+    label_intents_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+    label_intents_parser.add_argument(
+        "--cache",
+        type=Path,
+        default=None,
+        help="optional JSONL cache of labeler verdicts; matching entries are reused until the file is deleted",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "smoke-llm":
@@ -456,9 +695,11 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         lines = [
             f"input: {args.input} ({report.total} interactions)",
-            f"retained: {report.retained} "
-            f"(english {report.retained - report.no_signal}, "
-            f"no confident signal {report.no_signal})",
+            (
+                f"retained: {report.retained} "
+                f"(english {report.retained - report.no_signal}, "
+                f"no confident signal {report.no_signal})"
+            ),
             f"filtered: {report.filtered} ({report.filter_rate:.2%})",
         ]
         if report.filtered_by_language:
@@ -745,6 +986,120 @@ def main(argv: list[str] | None = None) -> int:
             print(f"dataset written: {args.out}")
         return 0
 
+    if args.command == "build-minilm-index":
+        problem = _output_paths_error(args.input, args.index_out, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            records = resolution.read_resolution_dataset_jsonl(args.input)
+            index, report = minilm.build_minilm_index(
+                records, embedding.MiniLMEmbedder()
+            )
+            if args.index_out:
+                staged.append(
+                    (
+                        args.index_out,
+                        minilm.stage_minilm_index_json(index, args.index_out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "index_version": report.index_version,
+                    "total_records": report.total_records,
+                    "indexed": report.indexed,
+                    "skipped": report.skipped,
+                    "embedding_model": report.embedding_model,
+                    "embedding_dim": report.embedding_dim,
+                    "build_time_s": report.build_time_s,
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            resolution.ResolutionDatasetError,
+            minilm.MiniLMError,
+            embedding.EmbeddingError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.total_records} records)",
+            f"indexed: {report.indexed} resolved cases (skipped {report.skipped})",
+            f"model: {report.embedding_model} (dim {report.embedding_dim})",
+            f"build time: {report.build_time_s:.2f}s",
+        ]
+        for line in lines:
+            print(line)
+        if args.index_out:
+            print(f"index written: {args.index_out}")
+        if args.report:
+            print(f"report written: {args.report}")
+        return 0
+
+    if args.command == "retrieve-minilm":
+        if (args.index is None) == (args.input is None):
+            print("error: provide exactly one of --index or --in", file=sys.stderr)
+            return 1
+        if args.top_k < 1:
+            print("error: --top-k must be >= 1", file=sys.stderr)
+            return 1
+        problem = _output_paths_error(args.index, args.input, args.report)
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            embedder = embedding.MiniLMEmbedder()
+            if args.index is not None:
+                index = minilm.read_minilm_index_json(args.index)
+            else:
+                records = resolution.read_resolution_dataset_jsonl(args.input)
+                index, _ = minilm.build_minilm_index(records, embedder)
+            cases = minilm.retrieve_minilm(
+                index, args.query, embedder, top_k=args.top_k
+            )
+            if args.report:
+                payload = {
+                    "query": args.query,
+                    "top_k": args.top_k,
+                    "results": [
+                        {
+                            "interaction_id": case.interaction_id,
+                            "score": case.score,
+                        }
+                        for case in cases
+                    ],
+                }
+                _write_json_report(args.report, payload)
+        except (
+            resolution.ResolutionDatasetError,
+            minilm.MiniLMError,
+            embedding.EmbeddingError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        origin = args.index if args.index is not None else args.input
+        print(f"index: {origin} ({len(index.doc_ids)} cases)")
+        print(f'query: "{args.query}"')
+        if not cases:
+            print("no matching cases")
+        for rank, case in enumerate(cases, start=1):
+            print(
+                f"{rank}. interaction {case.interaction_id} "
+                f"(score {case.score:.3f})"
+            )
+        if args.report:
+            print(f"report written: {args.report}")
+        return 0
+
     if args.command == "discover-intents":
         problem = _output_paths_error(
             args.input,
@@ -936,6 +1291,332 @@ def main(argv: list[str] | None = None) -> int:
         print(f"intent: {prediction.intent}")
         print(f"confidence: {prediction.confidence:.2f}")
         print(f"model: {prediction.model}")
+        return 0
+
+    if args.command == "sample-golden":
+        problem = _output_paths_error(
+            args.input,
+            args.taxonomy,
+            args.hints,
+            args.out,
+            args.report,
+            message="golden sampling paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            labelable = tuple(
+                interaction
+                for interaction in found
+                if interactions.has_customer_message(interaction)
+            )
+            excluded = len(found) - len(labelable)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            cache = golden.HintCache(args.hints)
+            hints, models = golden.classify_hints(
+                labelable, final, workers=args.workers, cache=cache
+            )
+            items, report = golden.plan_queue(
+                hints,
+                final.intent_ids,
+                target_size=args.target,
+                floor=args.floor,
+                auto_share=args.auto_share,
+                seed=args.seed,
+            )
+            if args.out:
+                staged.append((args.out, golden.stage_queue_jsonl(items, args.out)))
+            if args.report:
+                payload = {
+                    "seed": report.seed,
+                    "hinted": report.hinted,
+                    "target_size": report.target_size,
+                    "floor": report.floor,
+                    "auto_share_target": report.auto_share_target,
+                    "selected": report.selected,
+                    "selected_auto": report.selected_auto,
+                    "selected_escalate": report.selected_escalate,
+                    "predicted_auto_share": report.predicted_auto_share,
+                    "balance_target_met": report.balance_target_met,
+                    "models": list(models),
+                    "per_intent": {
+                        intent_id: {
+                            "available": allocation.available,
+                            "available_auto": allocation.available_auto,
+                            "available_escalate": allocation.available_escalate,
+                            "selected": allocation.selected,
+                            "selected_auto": allocation.selected_auto,
+                            "selected_escalate": allocation.selected_escalate,
+                        }
+                        for intent_id, allocation in report.per_intent.items()
+                    },
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            golden.GoldenError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({len(found)} interactions)",
+            (
+                f"hints: {args.hints} ({report.hinted} hinted, "
+                f"models: {', '.join(models) or 'none'})"
+            ),
+            (
+                f"target: {report.target_size} "
+                f"(floor {report.floor}, auto share {report.auto_share_target:.2%})"
+            ),
+            (
+                f"selected: {report.selected} "
+                f"(predicted auto {report.selected_auto}, "
+                f"escalate {report.selected_escalate}, "
+                f"share {report.predicted_auto_share:.2%}; "
+                f"balance target {'met' if report.balance_target_met else 'NOT met'})"
+            ),
+        ]
+        for intent_id, allocation in report.per_intent.items():
+            lines.append(
+                f"{intent_id}: {allocation.selected}/{allocation.available} "
+                f"(auto {allocation.selected_auto}/{allocation.available_auto}, "
+                f"escalate {allocation.selected_escalate}/{allocation.available_escalate})"
+            )
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
+            )
+        if not golden.MIN_GOLDEN_SIZE <= report.selected <= golden.MAX_GOLDEN_SIZE:
+            lines.append(
+                f"warning: selected {report.selected} is outside the spec's "
+                f"{golden.MIN_GOLDEN_SIZE}-{golden.MAX_GOLDEN_SIZE} Golden Set range"
+            )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"queue written: {args.out}")
+        return 0
+
+    if args.command == "label-golden":
+        problem = _output_paths_error(
+            args.queue,
+            args.holdout,
+            args.taxonomy,
+            args.out,
+            args.report,
+            message="golden labeling paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            queue = golden.read_queue_jsonl(args.queue, final.intent_ids)
+            found = interactions.read_interactions_jsonl(args.holdout)
+            _, report = golden.label_golden(
+                queue, found, final, args.out, ask=input, tell=print
+            )
+            if args.report:
+                payload = {
+                    "golden_set_version": report.golden_set_version,
+                    "taxonomy_version": report.taxonomy_version,
+                    "queue_total": report.queue_total,
+                    "labeled": report.labeled,
+                    "skipped": report.skipped,
+                    "remaining": report.remaining,
+                    "complete": report.complete,
+                    "auto_share": report.auto_share,
+                    "notes_share": report.notes_share,
+                    "by_decision": dict(report.by_decision),
+                    "by_intent": {
+                        intent_id: {
+                            "total": counts.total,
+                            "auto": counts.auto,
+                            "escalate": counts.escalate,
+                        }
+                        for intent_id, counts in report.by_intent.items()
+                    },
+                    "hint_agreement": {
+                        "intent": {
+                            "agree": report.hint_intent_agreement,
+                            "share": report.hint_intent_agreement_share,
+                        },
+                        "decision": {
+                            "agree": report.hint_decision_agreement,
+                            "share": report.hint_decision_agreement_share,
+                        },
+                    },
+                }
+                _write_json_report(args.report, payload)
+        except (
+            golden.GoldenError,
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            f"queue: {args.queue} ({report.queue_total} queued)",
+            f"holdout: {args.holdout} ({len(found)} interactions)",
+            (
+                f"labeled: {report.labeled} "
+                f"(auto {report.by_decision[golden.AUTO]}, "
+                f"escalate {report.by_decision[golden.ESCALATE]})"
+            ),
+            f"remaining: {report.remaining}",
+            f"notes filled: {report.notes_filled}",
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if Path(args.out).is_file():
+            print(f"golden set written: {args.out}")
+        return 0
+
+    if args.command == "label-intents":
+        pool_guard = (
+            intent_labels.DEFAULT_POOL_PATH
+            if intent_labels.DEFAULT_POOL_PATH.resolve() != args.input.resolve()
+            else None
+        )
+        problem = _output_paths_error(
+            args.input,
+            pool_guard,
+            args.taxonomy,
+            args.corrections,
+            args.out,
+            args.report,
+            args.review,
+            args.cache,
+            message="paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            excluded = sum(
+                1
+                for interaction in found
+                if not interactions.has_customer_message(interaction)
+            )
+            if pool_guard is None:
+                pool = found
+            else:
+                try:
+                    pool = interactions.read_interactions_jsonl(
+                        intent_labels.DEFAULT_POOL_PATH
+                    )
+                except interactions.InteractionsError as exc:
+                    raise intent_labels.IntentLabelError(
+                        f"cannot read the RAG pool "
+                        f"{intent_labels.DEFAULT_POOL_PATH}: {exc}"
+                    ) from exc
+            intent_labels.require_pool_membership(found, pool)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            corrections = (
+                intent_labels.read_corrections_jsonl(
+                    args.corrections, final.intent_ids
+                )
+                if args.corrections
+                else None
+            )
+            cache = intent_labels.IntentLabelCache(args.cache) if args.cache else None
+            labels, report = intent_labels.label_dev_slice(
+                found,
+                final,
+                dev_size=args.dev_size,
+                seed=args.seed,
+                workers=args.workers,
+                cache=cache,
+                corrections=corrections,
+            )
+            if args.out:
+                staged.append(
+                    (
+                        args.out,
+                        intent_labels.stage_intent_labels_jsonl(labels, args.out),
+                    )
+                )
+            if args.report:
+                payload = {
+                    "taxonomy_version": report.taxonomy_version,
+                    "seed": report.seed,
+                    "input_total": report.input_total,
+                    "requested": report.requested,
+                    "total": report.total,
+                    "per_intent": dict(report.per_intent),
+                    "sources": {
+                        "labeler": report.labeler,
+                        "human": report.human,
+                    },
+                    "models": list(report.models),
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            if args.review:
+                staged.append(
+                    (
+                        args.review,
+                        intent_labels.stage_review_markdown(
+                            labels, report, final, args.review
+                        ),
+                    )
+                )
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            intent_labels.IntentLabelError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({report.input_total} interactions)",
+            f"taxonomy: {args.taxonomy} (v{report.taxonomy_version})",
+            (
+                f"dev slice: {report.total} of {report.input_total} "
+                f"(requested {report.requested}, seed {report.seed})"
+            ),
+        ]
+        for intent_id in final.intent_ids:
+            lines.append(f"{intent_id}: {report.per_intent.get(intent_id, 0)}")
+        lines.append(f"sources: labeler {report.labeler}, human {report.human}")
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
+            )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"labels written: {args.out}")
+        if args.review:
+            print(f"review written: {args.review}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")
