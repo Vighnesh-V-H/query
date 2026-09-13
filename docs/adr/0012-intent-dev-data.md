@@ -57,21 +57,27 @@ changing the labeler model and fresh verdicts are wanted.
 
 ## Consequences
 
+- The recorded 500-label run is committed (`data/intent-dev-labels.jsonl`,
+  `data/intent-dev-report.json`, `docs/intent-dev-review.md`) so downstream
+  stages run on a fresh checkout, like the cluster artifact; regenerating it
+  needs the provider credential.
 - The default 500-label slice costs hundreds of labeler calls; `--workers`
   bounds concurrency and `--cache` makes reruns resume. The committed
   spot-check audited a 30-label trial slice (seed 42): 28/30 agreement, with
   the two misses both on documented taxonomy boundaries
   (vague device-trouble → `other` vs `app_technical`; paid-but-inactive
   upgrade → `subscription_plans` vs `billing_payment`).
-- Thin intents can vanish from small slices: the trial 30-slice holds zero
-  `library_playlists` and zero `presale_codes` labels. The report keeps those
-  zeros visible, and the full 500-slice still under-covers `presale_codes`
-  (~4 expected) — a recorded training caveat, not a reason to hide the
-  theme.
+- Thin intents can vanish from small slices: the trial 30-slice held zero
+  `library_playlists` and zero `presale_codes` labels. The report keeps zeros
+  visible, and the committed 500-label slice covers all 13 intents with
+  `presale_codes` thinnest at 8 (1.6%) — a recorded training caveat for ticket
+  13, not a reason to hide the theme.
 - Rerunning with the same seed labels the same slice, but the labeler can
-  move labels; the cache pins a run's verdicts by prompt hash. A taxonomy
-  edit changes the prompt and therefore the hash, so stale verdicts miss
-  automatically.
+  move labels: a fresh 500 run moved three of the audited 30 trial verdicts,
+  so the committed `data/intent-dev-labels.jsonl` (with its report and
+  Markdown review) is the pinned training record. The cache replays a run's
+  verdicts by prompt hash; a taxonomy edit changes the prompt and therefore
+  the hash, so stale verdicts miss automatically.
 - Human corrections are first-class records (`source: human`), so the
   spot-check can promote a fix without losing the label contract downstream
   stages validate.

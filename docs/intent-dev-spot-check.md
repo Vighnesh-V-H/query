@@ -48,6 +48,28 @@ seed and interaction id, so this 30-slice is the rank-prefix of the default
 Asterisks are borderline-accepts: defensible calls on documented boundaries,
 kept as agreements.
 
+## Committed 500-label run
+
+The full dev slice was later labeled end to end with the same seed, taxonomy,
+and labeler (`--dev-size 500 --cache data/intent-dev-cache.jsonl`); its
+artifacts are committed at `data/intent-dev-labels.jsonl`,
+`data/intent-dev-report.json`, and `docs/intent-dev-review.md`. The 30 trial
+interactions above are the rank-prefix of that slice, so the same human
+judgments audit the committed labels. The labeler is non-deterministic even at
+temperature 0.0, and the fresh run moved three of the trial verdicts:
+
+| Interaction | Trial | Committed | Human audit |
+|-------------|-------|-----------|-------------|
+| 189914 | `billing_payment` | `subscription_plans` | `billing_payment` (money matter) |
+| 723755 | `other` | `app_technical` | `app_technical` (finding 1) |
+| 1161837 | `app_technical` | `library_playlists` | `app_technical` (update cause beats library symptom) |
+
+Under the audit's independent judgments the committed 30-prefix agrees 27/30
+(723755 now matches; 189914, 1161837, and 2902781 disagree). The committed
+labels are therefore the pinned record: the prompt-hash cache replays them
+exactly, and a fresh run may move verdicts again. All 13 intents have labels
+in the committed 500, thinnest `presale_codes` at 8 (1.6%).
+
 ## Findings
 
 1. **Vague device-trouble filed as `other` (723755).** "Anyone else having
@@ -78,5 +100,6 @@ kept as agreements.
   class weights for `presale_codes` and other thin intents.
 - Ticket 14 (LLM classifier): adopt findings 1–2 as prompt examples; reuse
   this 30-label slice as the first sanity-check set.
-- Re-audit after any prompt change; the label cache pins this run's verdicts
-  by prompt hash, so a re-run with new examples recomputes cleanly.
+- Re-audit after any prompt change; the committed labels and the prompt-hash
+  cache pin this run's verdicts, so a re-run with new examples recomputes
+  cleanly.
