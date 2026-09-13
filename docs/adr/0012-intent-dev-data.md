@@ -54,9 +54,9 @@ changing the labeler model and fresh verdicts are wanted.
   evaluation data into the baseline.
 - **Trust the caller to pass the pool (no membership check)**: rejected. The
   holdout must never reach training data, a wrong `--in` is one flag away,
-  and checking interaction-id membership against the canonical pool artifact
-  before labeling is cheap — the guarantee should be enforced, not just
-  documented.
+  and checking interaction-id and full-record membership against the canonical
+  pool artifact before labeling is cheap — the guarantee should be enforced,
+  not just documented.
 - **Pseudo-label from discovery cluster mappings**: rejected. A cluster
   mapping is one verdict for dozens of messages and inherits the clustering's
   errors; the classifiers need per-message verdicts with justifications.
@@ -77,7 +77,7 @@ changing the labeler model and fresh verdicts are wanted.
   the two misses both on documented taxonomy boundaries
   (vague device-trouble → `other` vs `app_technical`; paid-but-inactive
   upgrade → `subscription_plans` vs `billing_payment`). The committed run's
-  five flags — the price-rise question (189914), the update-dropped songs
+  five mislabels — the price-rise question (189914), the update-dropped songs
   (1161837), the paid-but-inactive upgrade (2902781), the album-add request
   (1733259), and the DM chatter (820235) — are corrected through the
   committed corrections file, so the pinned 30-prefix agrees 30/30 with the
