@@ -1,0 +1,29 @@
+{
+  "taxonomy_version": 1,
+  "seed": 42,
+  "input_total": 3000,
+  "requested": 500,
+  "total": 500,
+  "per_intent": {
+    "account": 47,
+    "billing_payment": 46,
+    "subscription_plans": 51,
+    "family_plan": 16,
+    "playback": 37,
+    "library_playlists": 12,
+    "downloads_offline": 11,
+    "app_technical": 65,
+    "content_availability": 57,
+    "market_availability": 26,
+    "feature_feedback": 66,
+    "presale_codes": 8,
+    "other": 58
+  },
+  "sources": {
+    "labeler": 500,
+    "human": 0
+  },
+  "models": [
+    "nvidia/nemotron-3.5-lightning-30b-a3b"
+  ]
+}
