@@ -518,8 +518,21 @@ def main(argv: list[str] | None = None) -> int:
         "--in",
         dest="input",
         type=Path,
-        default=intent_labels.DEFAULT_INPUT_PATH,
-        help=f"Interactions JSONL path (default: {intent_labels.DEFAULT_INPUT_PATH})",
+        default=intent_labels.DEFAULT_POOL_PATH,
+        help=(
+            "Interactions JSONL path; must be the RAG pool or a subset of it "
+            f"(default: {intent_labels.DEFAULT_POOL_PATH})"
+        ),
+    )
+    label_intents_parser.add_argument(
+        "--corrections",
+        type=Path,
+        default=None,
+        help=(
+            "optional JSONL of hand corrections "
+            '({"interaction_id", "intent", "justification"}) applied as '
+            "source: human over the labeler verdicts"
+        ),
     )
     label_intents_parser.add_argument(
         "--taxonomy",
@@ -1442,9 +1455,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "label-intents":
+        pool_guard = (
+            intent_labels.DEFAULT_POOL_PATH
+            if intent_labels.DEFAULT_POOL_PATH.resolve() != args.input.resolve()
+            else None
+        )
         problem = _output_paths_error(
             args.input,
+            pool_guard,
             args.taxonomy,
+            args.corrections,
             args.out,
             args.report,
             args.review,
@@ -1462,7 +1482,27 @@ def main(argv: list[str] | None = None) -> int:
                 for interaction in found
                 if not intent_labels.has_customer_message(interaction)
             )
+            if pool_guard is None:
+                pool = found
+            else:
+                try:
+                    pool = interactions.read_interactions_jsonl(
+                        intent_labels.DEFAULT_POOL_PATH
+                    )
+                except interactions.InteractionsError as exc:
+                    raise intent_labels.IntentLabelError(
+                        f"cannot read the RAG pool "
+                        f"{intent_labels.DEFAULT_POOL_PATH}: {exc}"
+                    ) from exc
+            intent_labels.require_pool_membership(found, pool)
             final = taxonomy.read_final_taxonomy(args.taxonomy)
+            corrections = (
+                intent_labels.read_corrections_jsonl(
+                    args.corrections, final.intent_ids
+                )
+                if args.corrections
+                else None
+            )
             cache = intent_labels.IntentLabelCache(args.cache) if args.cache else None
             labels, report = intent_labels.label_dev_slice(
                 found,
@@ -1471,6 +1511,7 @@ def main(argv: list[str] | None = None) -> int:
                 seed=args.seed,
                 workers=args.workers,
                 cache=cache,
+                corrections=corrections,
             )
             if args.out:
                 staged.append(

@@ -340,6 +340,126 @@ class TestLabelDevSlice:
         assert "billing_payment" in labeler.prompts[0]
 
 
+class TestPoolMembership:
+    def test_subset_of_pool_is_allowed(self):
+        pool = _pool("one", "two", "three")
+        subset = (pool[0], pool[2])
+
+        intent_labels.require_pool_membership(subset, pool)
+
+    def test_interaction_outside_pool_raises(self):
+        pool = _pool("one", "two")
+        outsider = _interaction(99, "somewhere else")
+
+        with pytest.raises(
+            intent_labels.IntentLabelError, match="outside the RAG pool"
+        ):
+            intent_labels.require_pool_membership(pool + (outsider,), pool)
+
+    def test_pool_id_with_different_record_raises(self):
+        pool = _pool("one", "two")
+        impostor = _interaction(1, "a different message")
+
+        with pytest.raises(
+            intent_labels.IntentLabelError, match="differ from the RAG pool"
+        ):
+            intent_labels.require_pool_membership((impostor,), pool)
+
+    def test_empty_pool_raises(self):
+        with pytest.raises(intent_labels.IntentLabelError, match="empty"):
+            intent_labels.require_pool_membership(_pool("one"), ())
+
+
+class TestHumanCorrections:
+    def test_read_corrections_round_trip(self, tmp_path):
+        path = tmp_path / "corrections.jsonl"
+        path.write_text(
+            '{"interaction_id": 2, "intent": "other", '
+            '"justification": "  support-channel  chatter  "}\n',
+            encoding="utf-8",
+        )
+
+        corrections = intent_labels.read_corrections_jsonl(path, ("other",))
+
+        assert corrections == {
+            2: intent_labels.HumanCorrection(2, "other", "support-channel chatter")
+        }
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(intent_labels.IntentLabelError, match="does not exist"):
+            intent_labels.read_corrections_jsonl(tmp_path / "missing.jsonl")
+
+    def test_malformed_json_raises(self, tmp_path):
+        path = tmp_path / "corrections.jsonl"
+        path.write_text("{not json\n", encoding="utf-8")
+
+        with pytest.raises(intent_labels.IntentLabelError, match="malformed JSON"):
+            intent_labels.read_corrections_jsonl(path)
+
+    def test_unknown_intent_raises(self, tmp_path):
+        path = tmp_path / "corrections.jsonl"
+        path.write_text(
+            '{"interaction_id": 2, "intent": "mystery", "justification": "x"}\n',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(intent_labels.IntentLabelError, match="unknown intent"):
+            intent_labels.read_corrections_jsonl(path, ("other",))
+
+    def test_duplicate_interaction_id_raises(self, tmp_path):
+        path = tmp_path / "corrections.jsonl"
+        path.write_text(
+            '{"interaction_id": 2, "intent": "other", "justification": "x"}\n'
+            '{"interaction_id": 2, "intent": "other", "justification": "y"}\n',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(intent_labels.IntentLabelError, match="duplicate"):
+            intent_labels.read_corrections_jsonl(path)
+
+    def test_corrected_label_carries_human_source(self):
+        pool = _pool("my bill charge BILLMARK", "music will not play PLAYMARK")
+        final = _final("billing_payment", "playback", "other")
+        corrections = {1: intent_labels.HumanCorrection(1, "other", "No issue named.")}
+
+        labels, report = intent_labels.label_dev_slice(
+            pool, final, corrections=corrections, infer=_RoutingLabeler()
+        )
+
+        assert labels[0].source == "human"
+        assert labels[0].model is None
+        assert labels[0].intent == "other"
+        assert labels[0].justification == "No issue named."
+        assert labels[1].source == "labeler"
+        assert report.human == 1
+        assert report.labeler == 1
+        assert report.per_intent["other"] == 1
+
+    def test_correction_outside_slice_raises_before_labeling(self):
+        pool = _pool("my bill charge BILLMARK")
+        final = _final("billing_payment", "other")
+        corrections = {99: intent_labels.HumanCorrection(99, "other", "x")}
+
+        with pytest.raises(
+            intent_labels.IntentLabelError, match="outside the dev slice"
+        ):
+            intent_labels.label_dev_slice(
+                pool, final, corrections=corrections, infer=_BoomLabeler()
+            )
+
+    def test_unknown_correction_intent_raises_before_labeling(self):
+        pool = _pool("my bill charge BILLMARK")
+        final = _final("billing_payment", "other")
+        corrections = {1: intent_labels.HumanCorrection(1, "mystery", "x")}
+
+        with pytest.raises(
+            intent_labels.IntentLabelError, match="unknown intents"
+        ):
+            intent_labels.label_dev_slice(
+                pool, final, corrections=corrections, infer=_BoomLabeler()
+            )
+
+
 class TestIntentLabelCache:
     def test_reuses_verdicts_on_rerun(self, tmp_path):
         pool = _pool("hello one", "hello two")
@@ -594,14 +714,58 @@ class TestReviewMarkdown:
         assert "| `other` | 0 |" in markdown
         assert "music will not play" in markdown
         assert "_No labels in this slice._" in markdown
+        assert "## Human corrections" in markdown
+        assert "`[2]` charged twice — `billing_payment`: A charge problem." in markdown
+
+    def test_human_labels_are_shown_before_labeler_labels(self):
+        final = _final("other")
+        labels = (
+            intent_labels.IntentLabel(
+                interaction_id=1,
+                customer_message="labeler first",
+                intent="other",
+                source="labeler",
+                justification="A labeler verdict.",
+                model="test/labeler",
+                taxonomy_version=1,
+            ),
+            intent_labels.IntentLabel(
+                interaction_id=9,
+                customer_message="human ninth",
+                intent="other",
+                source="human",
+                justification="A human verdict.",
+                model=None,
+                taxonomy_version=1,
+            ),
+        )
+        report = intent_labels.IntentLabelReport(
+            total=2,
+            input_total=2,
+            requested=2,
+            seed=42,
+            taxonomy_version=1,
+            per_intent={"other": 2},
+            labeler=1,
+            human=1,
+            models=("test/labeler",),
+        )
+
+        markdown = intent_labels.render_review_markdown(
+            labels, report, final, examples_per_intent=1
+        )
+
+        assert "human ninth" in markdown
+        assert "labeler first" not in markdown
 
 
 class TestLabelIntentsCli:
-    def _write_pool(self, tmp_path):
-        pool = _pool(
-            "my bill charge BILLMARK",
-            "music will not play PLAYMARK",
-        )
+    def _write_pool(
+        self,
+        tmp_path,
+        texts=("my bill charge BILLMARK", "music will not play PLAYMARK"),
+    ):
+        pool = _pool(*texts)
         return interactions_mod.write_interactions_jsonl(
             pool, tmp_path / "rag-pool.jsonl"
         )
@@ -613,6 +777,7 @@ class TestLabelIntentsCli:
         out_path = tmp_path / "intent-dev-labels.jsonl"
         report_path = tmp_path / "intent-dev-report.json"
         review_path = tmp_path / "review.md"
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
         monkeypatch.setattr(
             intent_labels, "call_labeler", _RoutingLabeler(default="playback")
         )
@@ -705,6 +870,7 @@ class TestLabelIntentsCli:
         self, tmp_path, capsys, monkeypatch
     ):
         input_path = self._write_pool(tmp_path)
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
         monkeypatch.setattr(
             intent_labels, "call_labeler", _RoutingLabeler(default="playback")
         )
@@ -735,8 +901,9 @@ class TestLabelIntentsCli:
         )
         assert "error:" in capsys.readouterr().err
 
-    def test_missing_taxonomy_returns_1(self, tmp_path, capsys):
+    def test_missing_taxonomy_returns_1(self, tmp_path, capsys, monkeypatch):
         input_path = self._write_pool(tmp_path)
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
 
         assert (
             cli.main(
@@ -777,6 +944,7 @@ class TestLabelIntentsCli:
         input_path = self._write_pool(tmp_path)
         out_path = tmp_path / "intent-dev-labels.jsonl"
         cache_path = tmp_path / "intent-cache.jsonl"
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
         args = [
             "label-intents",
             "--in",
@@ -815,6 +983,7 @@ class TestLabelIntentsCli:
         report_path.write_text("previous report\n", encoding="utf-8")
         blocker = tmp_path / "blocker"
         blocker.write_text("not a directory", encoding="utf-8")
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
         monkeypatch.setattr(
             intent_labels, "call_labeler", _RoutingLabeler(default="playback")
         )
@@ -840,3 +1009,150 @@ class TestLabelIntentsCli:
         assert out_path.read_text(encoding="utf-8") == "previous labels\n"
         assert report_path.read_text(encoding="utf-8") == "previous report\n"
         assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_input_outside_rag_pool_returns_1(self, tmp_path, capsys, monkeypatch):
+        pool_path = self._write_pool(tmp_path)
+        outsider_path = interactions_mod.write_interactions_jsonl(
+            (_interaction(99, "somewhere else"),), tmp_path / "holdout.jsonl"
+        )
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", pool_path)
+        monkeypatch.setattr(intent_labels, "call_labeler", _BoomLabeler())
+
+        assert (
+            cli.main(["label-intents", "--in", str(outsider_path), "--dev-size", "1"])
+            == 1
+        )
+
+        assert "outside the RAG pool" in capsys.readouterr().err
+
+    def test_input_subset_of_rag_pool_is_labeled(self, tmp_path, capsys, monkeypatch):
+        pool_path = self._write_pool(
+            tmp_path,
+            ("my bill charge BILLMARK", "music will not play PLAYMARK", "hello there"),
+        )
+        subset_path = interactions_mod.write_interactions_jsonl(
+            (_interaction(2, "music will not play PLAYMARK"),),
+            tmp_path / "subset.jsonl",
+        )
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", pool_path)
+        monkeypatch.setattr(intent_labels, "call_labeler", _RoutingLabeler())
+
+        assert (
+            cli.main(["label-intents", "--in", str(subset_path), "--dev-size", "1"])
+            == 0
+        )
+
+        assert "dev slice: 1 of 1" in capsys.readouterr().out
+
+    def test_input_superset_of_rag_pool_returns_1(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        pool_path = self._write_pool(tmp_path)
+        superset_path = interactions_mod.write_interactions_jsonl(
+            _pool(
+                "my bill charge BILLMARK",
+                "music will not play PLAYMARK",
+                "extra interaction",
+            ),
+            tmp_path / "interactions-en.jsonl",
+        )
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", pool_path)
+        monkeypatch.setattr(intent_labels, "call_labeler", _BoomLabeler())
+
+        assert (
+            cli.main(
+                ["label-intents", "--in", str(superset_path), "--dev-size", "3"]
+            )
+            == 1
+        )
+
+        assert "outside the RAG pool" in capsys.readouterr().err
+
+    def test_missing_rag_pool_returns_1(self, tmp_path, capsys, monkeypatch):
+        input_path = self._write_pool(tmp_path)
+        monkeypatch.setattr(
+            intent_labels, "DEFAULT_POOL_PATH", tmp_path / "missing-pool.jsonl"
+        )
+
+        assert (
+            cli.main(["label-intents", "--in", str(input_path), "--dev-size", "1"]) == 1
+        )
+
+        assert "does not exist" in capsys.readouterr().err
+
+    def test_corrections_override_labels_with_human_source(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        input_path = self._write_pool(tmp_path)
+        out_path = tmp_path / "intent-dev-labels.jsonl"
+        report_path = tmp_path / "intent-dev-report.json"
+        corrections_path = tmp_path / "corrections.jsonl"
+        corrections_path.write_text(
+            '{"interaction_id": 1, "intent": "other", '
+            '"justification": "Chatter with no issue."}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
+        monkeypatch.setattr(intent_labels, "call_labeler", _RoutingLabeler())
+
+        assert (
+            cli.main(
+                [
+                    "label-intents",
+                    "--in",
+                    str(input_path),
+                    "--corrections",
+                    str(corrections_path),
+                    "--dev-size",
+                    "2",
+                    "--out",
+                    str(out_path),
+                    "--report",
+                    str(report_path),
+                ]
+            )
+            == 0
+        )
+
+        records = [
+            json.loads(line)
+            for line in out_path.read_text(encoding="utf-8").splitlines()
+        ]
+        corrected = next(
+            record for record in records if record["interaction_id"] == 1
+        )
+        assert corrected["source"] == "human"
+        assert corrected["model"] is None
+        assert corrected["intent"] == "other"
+        assert corrected["justification"] == "Chatter with no issue."
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        assert payload["sources"] == {"labeler": 1, "human": 1}
+
+    def test_correction_outside_dev_slice_returns_1(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        input_path = self._write_pool(tmp_path)
+        corrections_path = tmp_path / "corrections.jsonl"
+        corrections_path.write_text(
+            '{"interaction_id": 99, "intent": "other", "justification": "x"}\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(intent_labels, "DEFAULT_POOL_PATH", input_path)
+        monkeypatch.setattr(intent_labels, "call_labeler", _BoomLabeler())
+
+        assert (
+            cli.main(
+                [
+                    "label-intents",
+                    "--in",
+                    str(input_path),
+                    "--corrections",
+                    str(corrections_path),
+                    "--dev-size",
+                    "2",
+                ]
+            )
+            == 1
+        )
+
+        assert "outside the dev slice" in capsys.readouterr().err

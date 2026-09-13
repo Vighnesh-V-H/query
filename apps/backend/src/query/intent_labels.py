@@ -13,16 +13,20 @@ sample-and-split stage), and the top ``dev_size`` are labeled. The same seed
 labels the same slice on any machine regardless of input-file order.
 Interactions whose opening message is blank are excluded before ranking: the
 label contract and this module's reader reject an empty ``customer_message``,
-so labeling one could never produce a usable label. Only the RAG pool is ever
-labeled here: the holdout stays reserved for the Golden Set, so a dev slice
-drawn from it would leak evaluation data into training.
+so labeling one could never produce a usable label. Only the RAG pool is
+labelable: :func:`require_pool_membership` refuses an input Interaction that is
+not in the canonical pool artifact, so the holdout stays reserved for the
+Golden Set and cannot leak evaluation data into training.
 
 Each label records its provenance. Fresh labels carry ``source: labeler`` with
 the model's one-line justification and model id; labels corrected by hand
-during spot-checking carry ``source: human`` with no model. The report counts
-the label distribution per intent — including intents that receive zero
-labels, so thin intents stay visible instead of silently vanishing — plus the
-source split and the models used.
+during spot-checking carry ``source: human`` with no model. A corrections
+JSONL (``--corrections``) applies those hand verdicts over the labeler's,
+keyed by interaction id; a correction that references an Interaction outside
+the selected slice is an error, so the file cannot silently drift from the
+slice it corrects. The report counts the label distribution per intent —
+including intents that receive zero labels, so thin intents stay visible
+instead of silently vanishing — plus the source split and the models used.
 
 The labeler is non-deterministic, so reruns can move labels. Verdicts are
 cached by prompt hash in a crash-safe append-only file, like closure
@@ -46,7 +50,7 @@ from query import cachefile, closure, llm, taxonomy
 from query.interactions import Interaction
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_INPUT_PATH = closure.DEFAULT_INPUT_PATH
+DEFAULT_POOL_PATH = closure.DEFAULT_INPUT_PATH
 DEFAULT_LABELS_PATH = REPO_ROOT / "data" / "intent-dev-labels.jsonl"
 DEFAULT_REPORT_PATH = REPO_ROOT / "data" / "intent-dev-report.json"
 DEFAULT_REVIEW_PATH = REPO_ROOT / "docs" / "intent-dev-review.md"
@@ -78,6 +82,15 @@ class IntentLabel:
     justification: str
     model: str | None
     taxonomy_version: int
+
+
+@dataclass(frozen=True)
+class HumanCorrection:
+    """A hand correction applied over one labeler verdict during spot-checking."""
+
+    interaction_id: int
+    intent: str
+    justification: str
 
 
 @dataclass(frozen=True)
@@ -160,6 +173,43 @@ def select_dev_slice(
     return tuple(sorted(picked, key=lambda interaction: interaction.interaction_id))
 
 
+def require_pool_membership(
+    interactions: Sequence[Interaction], pool: Sequence[Interaction]
+) -> None:
+    """Refuse to label anything that is not in the RAG pool.
+
+    The pool artifact is the only labelable population: the holdout and the
+    unfiltered Interaction files stay reserved for evaluation, and a dev slice
+    drawn from them would leak evaluation data into training. Membership is
+    checked by interaction id and record content before any labeler call, so
+    an accidental ``--in`` of the holdout fails instead of producing training
+    artifacts.
+    """
+    if not pool:
+        raise IntentLabelError("the RAG pool is empty")
+    pool_by_id = {interaction.interaction_id: interaction for interaction in pool}
+    outside: list[int] = []
+    mismatched: list[int] = []
+    for interaction in interactions:
+        original = pool_by_id.get(interaction.interaction_id)
+        if original is None:
+            outside.append(interaction.interaction_id)
+        elif original != interaction:
+            mismatched.append(interaction.interaction_id)
+    if outside:
+        shown = ", ".join(str(interaction_id) for interaction_id in outside[:5])
+        raise IntentLabelError(
+            f"{len(outside)} interactions are outside the RAG pool "
+            f"(e.g. {shown}); only the RAG pool may be labeled"
+        )
+    if mismatched:
+        shown = ", ".join(str(interaction_id) for interaction_id in mismatched[:5])
+        raise IntentLabelError(
+            f"{len(mismatched)} interactions differ from the RAG pool records "
+            f"(e.g. {shown}); only the RAG pool may be labeled"
+        )
+
+
 def label_dev_slice(
     interactions: Sequence[Interaction],
     final: taxonomy.FinalTaxonomy,
@@ -167,6 +217,7 @@ def label_dev_slice(
     seed: int = DEFAULT_SEED,
     workers: int = 1,
     cache: IntentLabelCache | None = None,
+    corrections: Mapping[int, HumanCorrection] | None = None,
     infer: Callable[[str], llm.LLMReply] | None = None,
 ) -> tuple[tuple[IntentLabel, ...], IntentLabelReport]:
     """Select the dev slice and label every opening Customer Message in it.
@@ -176,7 +227,9 @@ def label_dev_slice(
     Returns one label per selected Interaction, ordered by interaction id, and
     a report with the per-intent distribution. ``infer`` is the labeler call,
     kept injectable for tests; ``workers`` bounds concurrent labeler calls;
-    ``cache`` reuses and records verdicts so interrupted runs can resume.
+    ``cache`` reuses and records verdicts so interrupted runs can resume;
+    ``corrections`` replaces listed verdicts with human-source labels before
+    the report is built.
     """
     if workers < 1:
         raise IntentLabelError(f"workers must be at least 1, got {workers}")
@@ -186,6 +239,8 @@ def label_dev_slice(
         interaction for interaction in interactions if has_customer_message(interaction)
     )
     dev = select_dev_slice(labelable, dev_size=dev_size, seed=seed)
+    if corrections:
+        _require_valid_corrections(dev, corrections, final.intent_ids)
     infer = infer if infer is not None else call_labeler
     saved = cache.verdicts() if cache is not None else {}
     record = cache.record if cache is not None else None
@@ -210,6 +265,8 @@ def label_dev_slice(
                 for future in futures:
                     future.cancel()
                 raise
+    if corrections:
+        labels = _apply_corrections(labels, corrections)
     return labels, _report(
         labels, dev, interactions, final, dev_size, seed, intent_ids
     )
@@ -414,6 +471,35 @@ def read_intent_labels_jsonl(
     return tuple(labels)
 
 
+def read_corrections_jsonl(
+    input_path: Path | str, intent_ids: Collection[str] | None = None
+) -> dict[int, HumanCorrection]:
+    """Read hand corrections from JSON Lines, keyed by interaction id.
+
+    Each record is one ``{interaction_id, intent, justification}`` correction.
+    When ``intent_ids`` is given, every correction must name one of them.
+    Duplicate ids are rejected so the file never silently keeps only the last
+    verdict for an Interaction.
+    """
+    input_path = Path(input_path)
+    if not input_path.is_file():
+        raise IntentLabelError(f"intent corrections JSONL does not exist: {input_path}")
+    corrections: dict[int, HumanCorrection] = {}
+    with input_path.open("r", encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            location = f"line {line_number} of {input_path}"
+            correction = _parse_correction_record(line, location, intent_ids)
+            if correction.interaction_id in corrections:
+                raise IntentLabelError(
+                    f"duplicate interaction_id {correction.interaction_id} on "
+                    f"{location}"
+                )
+            corrections[correction.interaction_id] = correction
+    return corrections
+
+
 def render_review_markdown(
     labels: Sequence[IntentLabel],
     report: IntentLabelReport,
@@ -427,9 +513,9 @@ def render_review_markdown(
         (
             "Generated by `query label-intents` (ticket 12) over "
             f"{report.total} RAG-pool Customer Messages against taxonomy v"
-            f"{report.taxonomy_version}. Each message carries one labeler "
-            "verdict with a one-line justification; the human spot-check in "
-            "`docs/intent-dev-spot-check.md` audits a subsample of these "
+            f"{report.taxonomy_version}. Each message carries one intent label "
+            "with its source and a one-line justification; the human spot-check "
+            "in `docs/intent-dev-spot-check.md` audits a subsample of these "
             "labels."
         ),
         "",
@@ -446,6 +532,14 @@ def render_review_markdown(
     ]
     for intent in final.intents:
         lines.append(f"| `{intent.intent_id}` | {report.per_intent.get(intent.intent_id, 0)} |")
+    human_labels = [label for label in labels if label.source == "human"]
+    if human_labels:
+        lines.extend(["", "## Human corrections", ""])
+        for label in sorted(human_labels, key=lambda item: item.interaction_id):
+            lines.append(
+                f"- `[{label.interaction_id}]` {label.customer_message} "
+                f"— `{label.intent}`: {label.justification}"
+            )
     lines.extend(["", "## Labels per intent"])
     by_intent: dict[str, list[IntentLabel]] = {
         intent.intent_id: [] for intent in final.intents
@@ -454,7 +548,8 @@ def render_review_markdown(
         by_intent.setdefault(label.intent, []).append(label)
     for intent in final.intents:
         group = sorted(
-            by_intent[intent.intent_id], key=lambda item: item.interaction_id
+            by_intent[intent.intent_id],
+            key=lambda item: (item.source != "human", item.interaction_id),
         )
         lines.extend(
             [
@@ -612,6 +707,55 @@ def _report(
     )
 
 
+def _require_valid_corrections(
+    dev: Sequence[Interaction],
+    corrections: Mapping[int, HumanCorrection],
+    intent_ids: Collection[str],
+) -> None:
+    """Refuse corrections that cannot apply to the selected slice.
+
+    A stale interaction id or an intent outside the taxonomy is an error
+    rather than a silent no-op, so the committed corrections file cannot
+    drift away from the slice it corrects. Checked before labeling, so a
+    stale file cannot pay for a run first.
+    """
+    dev_ids = {interaction.interaction_id for interaction in dev}
+    unknown = sorted(set(corrections) - dev_ids)
+    if unknown:
+        raise IntentLabelError(
+            f"corrections reference interactions outside the dev slice: {unknown}"
+        )
+    unknown_intents = sorted(
+        {correction.intent for correction in corrections.values()} - set(intent_ids)
+    )
+    if unknown_intents:
+        raise IntentLabelError(f"corrections use unknown intents: {unknown_intents}")
+
+
+def _apply_corrections(
+    labels: tuple[IntentLabel, ...], corrections: Mapping[int, HumanCorrection]
+) -> tuple[IntentLabel, ...]:
+    """Replace corrected verdicts with human-source labels."""
+    corrected: list[IntentLabel] = []
+    for label in labels:
+        correction = corrections.get(label.interaction_id)
+        if correction is None:
+            corrected.append(label)
+            continue
+        corrected.append(
+            IntentLabel(
+                interaction_id=label.interaction_id,
+                customer_message=label.customer_message,
+                intent=correction.intent,
+                source="human",
+                justification=correction.justification,
+                model=None,
+                taxonomy_version=label.taxonomy_version,
+            )
+        )
+    return tuple(corrected)
+
+
 def _require_unique_ids(interactions: Sequence[Interaction]) -> None:
     seen: set[int] = set()
     for interaction in interactions:
@@ -658,6 +802,43 @@ def _parse_label_record(
     if error is not None:
         raise IntentLabelError(f"malformed intent label on {location}: {error}")
     return label
+
+
+def _parse_correction_record(
+    line: str, location: str, intent_ids: Collection[str] | None
+) -> HumanCorrection:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise IntentLabelError(
+            f"malformed JSON in corrections on {location}: {exc}"
+        ) from exc
+    if not isinstance(record, dict):
+        raise IntentLabelError(
+            f"malformed correction on {location}: expected an object"
+        )
+    interaction_id = record.get("interaction_id")
+    if type(interaction_id) is not int:
+        raise IntentLabelError(
+            f"malformed correction on {location}: invalid interaction_id"
+        )
+    intent = record.get("intent")
+    if not isinstance(intent, str) or not intent:
+        raise IntentLabelError(f"malformed correction on {location}: invalid intent")
+    if intent_ids is not None and intent not in intent_ids:
+        raise IntentLabelError(
+            f"malformed correction on {location}: unknown intent {intent!r}"
+        )
+    justification = record.get("justification")
+    if not isinstance(justification, str) or not justification.strip():
+        raise IntentLabelError(
+            f"malformed correction on {location}: invalid justification"
+        )
+    return HumanCorrection(
+        interaction_id=interaction_id,
+        intent=intent,
+        justification=" ".join(justification.split()),
+    )
 
 
 def _parse_cache_line(line: str, location: str) -> CachedIntentVerdict:
