@@ -10,9 +10,12 @@ role, constrained to the final taxonomy's intent ids.
 The slice is a rank, not a roll of the dice: every Interaction is ranked by a
 SHA-256 of the seed and its interaction id (the same scheme as the
 sample-and-split stage), and the top ``dev_size`` are labeled. The same seed
-labels the same slice on any machine regardless of input-file order. Only the
-RAG pool is ever labeled here: the holdout stays reserved for the Golden Set,
-so a dev slice drawn from it would leak evaluation data into training.
+labels the same slice on any machine regardless of input-file order.
+Interactions whose opening message is blank are excluded before ranking: the
+label contract and this module's reader reject an empty ``customer_message``,
+so labeling one could never produce a usable label. Only the RAG pool is ever
+labeled here: the holdout stays reserved for the Golden Set, so a dev slice
+drawn from it would leak evaluation data into training.
 
 Each label records its provenance. Fresh labels carry ``source: labeler`` with
 the model's one-line justification and model id; labels corrected by hand
@@ -168,6 +171,8 @@ def label_dev_slice(
 ) -> tuple[tuple[IntentLabel, ...], IntentLabelReport]:
     """Select the dev slice and label every opening Customer Message in it.
 
+    Interactions whose opening message is blank are dropped before the slice
+    is drawn, because the label contract rejects an empty ``customer_message``.
     Returns one label per selected Interaction, ordered by interaction id, and
     a report with the per-intent distribution. ``infer`` is the labeler call,
     kept injectable for tests; ``workers`` bounds concurrent labeler calls;
@@ -177,7 +182,10 @@ def label_dev_slice(
         raise IntentLabelError(f"workers must be at least 1, got {workers}")
     if not final.intents:
         raise IntentLabelError("final taxonomy has no intents to label against")
-    dev = select_dev_slice(interactions, dev_size=dev_size, seed=seed)
+    labelable = tuple(
+        interaction for interaction in interactions if has_customer_message(interaction)
+    )
+    dev = select_dev_slice(labelable, dev_size=dev_size, seed=seed)
     infer = infer if infer is not None else call_labeler
     saved = cache.verdicts() if cache is not None else {}
     record = cache.record if cache is not None else None
@@ -205,6 +213,11 @@ def label_dev_slice(
     return labels, _report(
         labels, dev, interactions, final, dev_size, seed, intent_ids
     )
+
+
+def has_customer_message(interaction: Interaction) -> bool:
+    """Whether the opening message is non-blank and therefore labelable."""
+    return bool(interaction.opening_message.text.strip())
 
 
 def call_labeler(prompt: str) -> llm.LLMReply:
@@ -507,13 +520,14 @@ def _label_one(
     """Label one Interaction's opening message, reusing a matching cache entry.
 
     The labeler is retried once with a repair prompt when a reply is not valid
-    JSON. Fresh verdicts are recorded immediately so an interrupted run can
-    resume.
+    JSON. A fresh verdict is recorded only after the label passes the contract
+    check, so a rejected label is never persisted and cannot wedge the cache.
     """
     message = interaction.opening_message.text
     prompt = build_prompt(message, interaction.interaction_id, final)
     cache_key = llm.prompt_sha256(SYSTEM_PROMPT, prompt)
     cached = saved.get(interaction.interaction_id)
+    verdict: CachedIntentVerdict | None = None
     if cached is not None and cached.prompt_sha256 == cache_key:
         label = IntentLabel(
             interaction_id=interaction.interaction_id,
@@ -545,22 +559,21 @@ def _label_one(
             model=reply.model,
             taxonomy_version=final.version,
         )
-        if record is not None:
-            record(
-                CachedIntentVerdict(
-                    interaction_id=label.interaction_id,
-                    prompt_sha256=cache_key,
-                    intent=intent,
-                    justification=justification,
-                    model=reply.model,
-                )
-            )
+        verdict = CachedIntentVerdict(
+            interaction_id=label.interaction_id,
+            prompt_sha256=cache_key,
+            intent=intent,
+            justification=justification,
+            model=reply.model,
+        )
     error = intent_label_error(label, intent_ids)
     if error is not None:
         raise IntentLabelError(
             f"label for interaction {interaction.interaction_id} violates the "
             f"contract: {error}"
         )
+    if verdict is not None and record is not None:
+        record(verdict)
     return label
 
 

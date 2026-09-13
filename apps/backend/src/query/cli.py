@@ -1457,6 +1457,11 @@ def main(argv: list[str] | None = None) -> int:
         staged: list[tuple[Path, Path]] = []
         try:
             found = interactions.read_interactions_jsonl(args.input)
+            excluded = sum(
+                1
+                for interaction in found
+                if not intent_labels.has_customer_message(interaction)
+            )
             final = taxonomy.read_final_taxonomy(args.taxonomy)
             cache = intent_labels.IntentLabelCache(args.cache) if args.cache else None
             labels, report = intent_labels.label_dev_slice(
@@ -1524,6 +1529,10 @@ def main(argv: list[str] | None = None) -> int:
         for intent_id in final.intent_ids:
             lines.append(f"{intent_id}: {report.per_intent.get(intent_id, 0)}")
         lines.append(f"sources: labeler {report.labeler}, human {report.human}")
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
+            )
         for line in lines:
             print(line)
         if args.report:

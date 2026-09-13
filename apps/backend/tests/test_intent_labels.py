@@ -202,6 +202,22 @@ class TestLabelDevSlice:
         assert report.total == 2
         assert report.input_total == 6
 
+    def test_blank_opening_messages_are_excluded_before_labeling(self):
+        pool = _pool("my bill charge BILLMARK", "   ", "music will not play PLAYMARK")
+        final = _final("billing_payment", "playback", "other")
+        labeler = _RoutingLabeler()
+
+        labels, report = intent_labels.label_dev_slice(
+            pool, final, dev_size=3, infer=labeler
+        )
+
+        assert [label.interaction_id for label in labels] == [1, 3]
+        assert report.total == 2
+        assert report.input_total == 3
+        assert "interaction 2" not in "".join(labeler.prompts)
+        assert intent_labels.has_customer_message(pool[0]) is True
+        assert intent_labels.has_customer_message(pool[1]) is False
+
     def test_prompt_carries_definitions_message_and_boundaries(self):
         pool = _pool("charged twice on my card")
         final = _final("billing_payment", "playback", "other")
@@ -382,6 +398,21 @@ class TestIntentLabelCache:
                 cache=intent_labels.IntentLabelCache(path),
                 infer=_BoomLabeler(),
             )
+
+    def test_rejected_label_is_not_recorded(self, tmp_path):
+        pool = _pool("hello")
+        path = tmp_path / "cache.jsonl"
+        cache = intent_labels.IntentLabelCache(path)
+
+        def empty_model(prompt):
+            return llm.LLMReply(content=_reply("other"), model="")
+
+        with pytest.raises(intent_labels.IntentLabelError, match="contract"):
+            intent_labels.label_dev_slice(
+                pool, _final("other"), cache=cache, infer=empty_model
+            )
+
+        assert cache.verdicts() == {}
 
 
 def _valid_label_json(**overrides):
@@ -631,6 +662,44 @@ class TestLabelIntentsCli:
         assert payload["per_intent"]["billing_payment"] == 1
         assert "# Intent dev-label review" in review_path.read_text(encoding="utf-8")
         assert [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_command_excludes_blank_opening_messages(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        pool = (
+            _interaction(1, "my bill charge BILLMARK"),
+            _interaction(2, "   "),
+            _interaction(3, "music will not play PLAYMARK"),
+        )
+        input_path = interactions_mod.write_interactions_jsonl(
+            pool, tmp_path / "rag-pool.jsonl"
+        )
+        out_path = tmp_path / "intent-dev-labels.jsonl"
+        monkeypatch.setattr(intent_labels, "call_labeler", _RoutingLabeler())
+
+        assert (
+            cli.main(
+                [
+                    "label-intents",
+                    "--in",
+                    str(input_path),
+                    "--dev-size",
+                    "3",
+                    "--out",
+                    str(out_path),
+                ]
+            )
+            == 0
+        )
+
+        output = capsys.readouterr().out
+        assert "excluded: 1 interactions with a blank opening message" in output
+        records = [
+            json.loads(line)
+            for line in out_path.read_text(encoding="utf-8").splitlines()
+        ]
+        assert {record["interaction_id"] for record in records} == {1, 3}
+        assert all(record["customer_message"].strip() for record in records)
 
     def test_command_without_outputs_prints_stats_only(
         self, tmp_path, capsys, monkeypatch
