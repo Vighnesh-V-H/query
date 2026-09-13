@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import Literal
 
 from query import cachefile, closure, llm, taxonomy
-from query.interactions import Interaction
+from query.interactions import Interaction, has_customer_message
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_POOL_PATH = closure.DEFAULT_INPUT_PATH
@@ -270,11 +270,6 @@ def label_dev_slice(
     return labels, _report(
         labels, dev, interactions, final, dev_size, seed, intent_ids
     )
-
-
-def has_customer_message(interaction: Interaction) -> bool:
-    """Whether the opening message is non-blank and therefore labelable."""
-    return bool(interaction.opening_message.text.strip())
 
 
 def call_labeler(prompt: str) -> llm.LLMReply:

@@ -1276,7 +1276,7 @@ def main(argv: list[str] | None = None) -> int:
             labelable = tuple(
                 interaction
                 for interaction in found
-                if golden.has_customer_message(interaction)
+                if interactions.has_customer_message(interaction)
             )
             excluded = len(found) - len(labelable)
             final = taxonomy.read_final_taxonomy(args.taxonomy)
@@ -1480,7 +1480,7 @@ def main(argv: list[str] | None = None) -> int:
             excluded = sum(
                 1
                 for interaction in found
-                if not intent_labels.has_customer_message(interaction)
+                if not interactions.has_customer_message(interaction)
             )
             if pool_guard is None:
                 pool = found

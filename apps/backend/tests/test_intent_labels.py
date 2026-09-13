@@ -215,8 +215,8 @@ class TestLabelDevSlice:
         assert report.total == 2
         assert report.input_total == 3
         assert "interaction 2" not in "".join(labeler.prompts)
-        assert intent_labels.has_customer_message(pool[0]) is True
-        assert intent_labels.has_customer_message(pool[1]) is False
+        assert interactions_mod.has_customer_message(pool[0]) is True
+        assert interactions_mod.has_customer_message(pool[1]) is False
 
     def test_prompt_carries_definitions_message_and_boundaries(self):
         pool = _pool("charged twice on my card")

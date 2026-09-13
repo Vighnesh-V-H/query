@@ -47,7 +47,7 @@ from typing import Literal
 import openai
 
 from query import cachefile, llm, taxonomy
-from query.interactions import Interaction
+from query.interactions import Interaction, has_customer_message
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_HOLDOUT_PATH = REPO_ROOT / "data" / "holdout.jsonl"
@@ -671,11 +671,6 @@ def read_golden_jsonl(
             seen_ids.add(example.interaction_id)
             examples.append(example)
     return tuple(examples)
-
-
-def has_customer_message(interaction: Interaction) -> bool:
-    """Whether the opening message is non-blank and therefore labelable."""
-    return bool(interaction.opening_message.text.strip())
 
 
 def label_golden(
