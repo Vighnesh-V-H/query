@@ -66,9 +66,10 @@ temperature 0.0, and the fresh run moved three of the trial verdicts:
 
 Under the audit's independent judgments the committed 30-prefix agrees 27/30
 (723755 now matches; 189914, 1161837, and 2902781 disagree). The committed
-labels are therefore the pinned record: the prompt-hash cache replays them
-exactly, and a fresh run may move verdicts again. All 13 intents have labels
-in the committed 500, thinnest `presale_codes` at 8 (1.6%).
+labels are therefore the pinned record: a rerun with the same cache
+reproduces them exactly, and a fresh run may move verdicts again. All 13
+intents have labels in the committed 500, thinnest `presale_codes` at 8
+(1.6%).
 
 ## Findings
 
@@ -91,8 +92,9 @@ in the committed 500, thinnest `presale_codes` at 8 (1.6%).
 4. **Thin intents vanish at n=30.** The slice holds zero `library_playlists`
    and zero `presale_codes` labels. Expected at this size (presale is 0.77%
    of the RAG pool) and honestly reported by the per-intent zeros — not a
-   labeling failure, but the full dev slice still under-covers presale (~4
-   expected at n=500), which ticket 13's training split must handle.
+   labeling failure; the committed 500-label slice covers `presale_codes` with
+   8 labels, still its thinnest intent, which ticket 13's training split must
+   handle.
 
 ## Follow-ups
 
