@@ -12,6 +12,7 @@ from query import (
     discovery,
     embedding,
     english,
+    golden,
     interactions,
     llm,
     reconciliation,
@@ -342,6 +343,110 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help=f"optional path to write the coverage report as JSON (e.g. {reconciliation.DEFAULT_REPORT_PATH})",
+    )
+
+    sample_golden_parser = sub.add_parser(
+        "sample-golden",
+        help="stratify holdout Interactions into a Golden Set labeling queue",
+    )
+    sample_golden_parser.add_argument(
+        "--in",
+        dest="input",
+        type=Path,
+        default=golden.DEFAULT_HOLDOUT_PATH,
+        help=f"holdout JSONL path (default: {golden.DEFAULT_HOLDOUT_PATH}; never the RAG pool)",
+    )
+    sample_golden_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--hints",
+        type=Path,
+        default=golden.DEFAULT_HINTS_PATH,
+        help=(
+            "intent/decision hint cache, read and extended with fresh labeler "
+            f"verdicts (default: {golden.DEFAULT_HINTS_PATH})"
+        ),
+    )
+    sample_golden_parser.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help=f"optional path to write the queue as JSON Lines (e.g. {golden.DEFAULT_QUEUE_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=f"optional path to write the sampling report as JSON (e.g. {golden.DEFAULT_SAMPLING_REPORT_PATH})",
+    )
+    sample_golden_parser.add_argument(
+        "--target",
+        type=int,
+        default=golden.DEFAULT_TARGET_SIZE,
+        help=f"Golden Set size to plan (default: {golden.DEFAULT_TARGET_SIZE})",
+    )
+    sample_golden_parser.add_argument(
+        "--floor",
+        type=int,
+        default=golden.DEFAULT_FLOOR,
+        help=f"minimum examples per intent (default: {golden.DEFAULT_FLOOR})",
+    )
+    sample_golden_parser.add_argument(
+        "--auto-share",
+        type=float,
+        default=golden.DEFAULT_AUTO_SHARE,
+        help=f"target share of predicted-auto examples (default: {golden.DEFAULT_AUTO_SHARE})",
+    )
+    sample_golden_parser.add_argument(
+        "--seed",
+        type=int,
+        default=golden.DEFAULT_SEED,
+        help=f"selection seed (default: {golden.DEFAULT_SEED})",
+    )
+    sample_golden_parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="concurrent labeler calls (default: 1)",
+    )
+
+    label_golden_parser = sub.add_parser(
+        "label-golden",
+        help="serve a Golden Set queue with the full Interaction for hand-labeling",
+    )
+    label_golden_parser.add_argument(
+        "--queue",
+        type=Path,
+        default=golden.DEFAULT_QUEUE_PATH,
+        help=f"queue JSONL path (default: {golden.DEFAULT_QUEUE_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--holdout",
+        type=Path,
+        default=golden.DEFAULT_HOLDOUT_PATH,
+        help=f"holdout JSONL path with the source Interactions (default: {golden.DEFAULT_HOLDOUT_PATH}; never the RAG pool)",
+    )
+    label_golden_parser.add_argument(
+        "--taxonomy",
+        type=Path,
+        default=taxonomy.DEFAULT_FINAL_TAXONOMY_PATH,
+        help=f"final taxonomy Markdown path (default: {taxonomy.DEFAULT_FINAL_TAXONOMY_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--out",
+        type=Path,
+        required=True,
+        help=f"path to write the Golden Set as JSON Lines (e.g. {golden.DEFAULT_GOLDEN_PATH})",
+    )
+    label_golden_parser.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=f"optional path to write the labeling report as JSON (e.g. {golden.DEFAULT_LABELING_REPORT_PATH})",
     )
 
     args = parser.parse_args(argv)
@@ -901,6 +1006,202 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         if args.report:
             print(f"report written: {args.report}")
+        return 0
+
+    if args.command == "sample-golden":
+        problem = _output_paths_error(
+            args.input,
+            args.taxonomy,
+            args.hints,
+            args.out,
+            args.report,
+            message="golden sampling paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        staged: list[tuple[Path, Path]] = []
+        try:
+            found = interactions.read_interactions_jsonl(args.input)
+            labelable = tuple(
+                interaction
+                for interaction in found
+                if golden.has_customer_message(interaction)
+            )
+            excluded = len(found) - len(labelable)
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            cache = golden.HintCache(args.hints)
+            hints, models = golden.classify_hints(
+                labelable, final, workers=args.workers, cache=cache
+            )
+            items, report = golden.plan_queue(
+                hints,
+                final.intent_ids,
+                target_size=args.target,
+                floor=args.floor,
+                auto_share=args.auto_share,
+                seed=args.seed,
+            )
+            if args.out:
+                staged.append((args.out, golden.stage_queue_jsonl(items, args.out)))
+            if args.report:
+                payload = {
+                    "seed": report.seed,
+                    "hinted": report.hinted,
+                    "target_size": report.target_size,
+                    "floor": report.floor,
+                    "auto_share_target": report.auto_share_target,
+                    "selected": report.selected,
+                    "selected_auto": report.selected_auto,
+                    "selected_escalate": report.selected_escalate,
+                    "predicted_auto_share": report.predicted_auto_share,
+                    "balance_target_met": report.balance_target_met,
+                    "models": list(models),
+                    "per_intent": {
+                        intent_id: {
+                            "available": allocation.available,
+                            "available_auto": allocation.available_auto,
+                            "available_escalate": allocation.available_escalate,
+                            "selected": allocation.selected,
+                            "selected_auto": allocation.selected_auto,
+                            "selected_escalate": allocation.selected_escalate,
+                        }
+                        for intent_id, allocation in report.per_intent.items()
+                    },
+                }
+                staged.append((args.report, _stage_json_report(args.report, payload)))
+            _commit_staged_outputs(staged)
+        except (
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            golden.GoldenError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        finally:
+            for _, temporary in staged:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+        lines = [
+            f"input: {args.input} ({len(found)} interactions)",
+            (
+                f"hints: {args.hints} ({report.hinted} hinted, "
+                f"models: {', '.join(models) or 'none'})"
+            ),
+            (
+                f"target: {report.target_size} "
+                f"(floor {report.floor}, auto share {report.auto_share_target:.2%})"
+            ),
+            (
+                f"selected: {report.selected} "
+                f"(predicted auto {report.selected_auto}, "
+                f"escalate {report.selected_escalate}, "
+                f"share {report.predicted_auto_share:.2%}; "
+                f"balance target {'met' if report.balance_target_met else 'NOT met'})"
+            ),
+        ]
+        for intent_id, allocation in report.per_intent.items():
+            lines.append(
+                f"{intent_id}: {allocation.selected}/{allocation.available} "
+                f"(auto {allocation.selected_auto}/{allocation.available_auto}, "
+                f"escalate {allocation.selected_escalate}/{allocation.available_escalate})"
+            )
+        if excluded:
+            lines.append(
+                f"excluded: {excluded} interactions with a blank opening message"
+            )
+        if not golden.MIN_GOLDEN_SIZE <= report.selected <= golden.MAX_GOLDEN_SIZE:
+            lines.append(
+                f"warning: selected {report.selected} is outside the spec's "
+                f"{golden.MIN_GOLDEN_SIZE}-{golden.MAX_GOLDEN_SIZE} Golden Set range"
+            )
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if args.out:
+            print(f"queue written: {args.out}")
+        return 0
+
+    if args.command == "label-golden":
+        problem = _output_paths_error(
+            args.queue,
+            args.holdout,
+            args.taxonomy,
+            args.out,
+            args.report,
+            message="golden labeling paths must be distinct from each other",
+        )
+        if problem is not None:
+            print(f"error: {problem}", file=sys.stderr)
+            return 1
+        try:
+            final = taxonomy.read_final_taxonomy(args.taxonomy)
+            queue = golden.read_queue_jsonl(args.queue, final.intent_ids)
+            found = interactions.read_interactions_jsonl(args.holdout)
+            _, report = golden.label_golden(
+                queue, found, final, args.out, ask=input, tell=print
+            )
+            if args.report:
+                payload = {
+                    "golden_set_version": report.golden_set_version,
+                    "taxonomy_version": report.taxonomy_version,
+                    "queue_total": report.queue_total,
+                    "labeled": report.labeled,
+                    "skipped": report.skipped,
+                    "remaining": report.remaining,
+                    "complete": report.complete,
+                    "auto_share": report.auto_share,
+                    "notes_share": report.notes_share,
+                    "by_decision": dict(report.by_decision),
+                    "by_intent": {
+                        intent_id: {
+                            "total": counts.total,
+                            "auto": counts.auto,
+                            "escalate": counts.escalate,
+                        }
+                        for intent_id, counts in report.by_intent.items()
+                    },
+                    "hint_agreement": {
+                        "intent": {
+                            "agree": report.hint_intent_agreement,
+                            "share": report.hint_intent_agreement_share,
+                        },
+                        "decision": {
+                            "agree": report.hint_decision_agreement,
+                            "share": report.hint_decision_agreement_share,
+                        },
+                    },
+                }
+                _write_json_report(args.report, payload)
+        except (
+            golden.GoldenError,
+            interactions.InteractionsError,
+            taxonomy.TaxonomyError,
+            OSError,
+        ) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        lines = [
+            f"queue: {args.queue} ({report.queue_total} queued)",
+            f"holdout: {args.holdout} ({len(found)} interactions)",
+            (
+                f"labeled: {report.labeled} "
+                f"(auto {report.by_decision[golden.AUTO]}, "
+                f"escalate {report.by_decision[golden.ESCALATE]})"
+            ),
+            f"remaining: {report.remaining}",
+            f"notes filled: {report.notes_filled}",
+        ]
+        for line in lines:
+            print(line)
+        if args.report:
+            print(f"report written: {args.report}")
+        if Path(args.out).is_file():
+            print(f"golden set written: {args.out}")
         return 0
 
     raise SystemExit(f"unknown command: {args.command}")

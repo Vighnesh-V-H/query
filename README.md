@@ -120,6 +120,26 @@ uv run --package query query reconcile-intents --report data/intent-reconciliati
 
 `docs/intent-taxonomy.md` is the versioned single source of truth (v1: 12 support intents plus an `other` fallback), and later stages import it with `query.taxonomy.read_final_taxonomy()`; `docs/intent-seed-taxonomy.md` stays as input evidence. The recorded decisions: `account_access` + `account_admin` merge into `account`, `devices_connectivity` folds into `app_technical`, and discovery's `new` cluster (concert presale codes) is promoted as `presale_codes`. `query reconcile-intents` routes every cluster of `data/intent-clusters.jsonl` through those decisions and fails on drift — a dropped seed intent that receives mapped clusters, a `new` cluster without a decision, or a final intent left without cluster evidence. The cluster artifact is committed alongside the taxonomy: it is the recorded labeler snapshot the decisions cite and cannot be exactly reproduced, so the command runs on a fresh checkout; `--in` accepts a regenerated snapshot instead. The recorded run covers all 30 clusters over 3,000 messages: 2,524 (84.13%) route to a support intent and 476 stay as `other`. `--in` defaults to the cluster artifact, `--seed` to the seed document, and `--taxonomy` to the final taxonomy; `--report` writes the per-intent coverage as JSON, and all paths must be distinct.
 
+## Sample the Golden Set queue
+
+Stratify the holdout into a labelling queue with a per-intent floor and a target auto/escalate balance (see `docs/adr/0011-golden-labeling-cli.md`):
+
+```sh
+uv run --package query query sample-golden --in data/holdout.jsonl --out data/golden-queue.jsonl --report data/golden-sampling-report.json --workers 8
+```
+
+The holdout has no intent labels, so the configured `labeler` role predicts one intent and a coarse auto/escalate decision per holdout message; the predictions are cached by prompt hash in `data/holdout-hints.jsonl` and only choose which Interactions get served — they are never shown to the human and never become gold. Each intent is apportioned proportionally with a floor of 10 examples, and each quota is split between predicted-auto and predicted-escalate candidates to land on 60/40; the floors win when they alone exceed the target of 200. The sampling report records per-intent availability and selection, the predicted balance, and whether the target was reachable, so an infeasible target is visible rather than silently missed. `--target`, `--floor`, `--auto-share`, `--seed`, and `--workers` tune the run; `--hints` points at a different hint cache or an external artifact in the same format, and hints without a prompt hash are trusted as given. Interactions with a blank opening message are excluded before hinting and counted on the console, and one that reaches the queue anyway is skipped rather than written, because the Golden Set reader rejects an empty `customer_message`.
+
+## Label the Golden Set
+
+Serve the queue one Interaction at a time, with the full transcript, for hand-labelling:
+
+```sh
+uv run --package query query label-golden --queue data/golden-queue.jsonl --holdout data/holdout.jsonl --out data/golden-set.jsonl --report data/golden-report.json
+```
+
+Each session prints the Interaction with sides and timestamps, offers the final taxonomy as a numbered menu (`?`), and prompts for a gold intent, a gold auto/escalate decision, and optional notes; `s` skips an example and `q` pauses at every prompt. Every completed label is written before the next Interaction is shown, so an interrupted session resumes by skipping the ids already labelled, and a queue and Golden Set that do not belong together fail instead of mixing. Each line is `{interaction_id, taxonomy_version, customer_message, gold_intent, gold_decision, notes, hint_intent, hint_decision}`; the report carries the per-intent and per-decision distribution, notes coverage, and predicted-versus-gold agreement, keyed to the Golden Set and taxonomy versions.
+
 ## Model configuration
 
 Model roles (generator / judge / labeler) and the NVIDIA NIM base URL live in `apps/backend/configs/models.yaml`. Each role can be overridden with a `QUERY_<ROLE>_MODEL` env var (e.g. `QUERY_GENERATOR_MODEL`). Set `QUERY_CONFIG_PATH` to load model roles from an alternate config file.
